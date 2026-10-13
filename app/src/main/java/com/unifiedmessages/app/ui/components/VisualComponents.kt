@@ -71,7 +71,12 @@ fun SourceBadge(
     Box(
         modifier = modifier
             .clip(shape)
-            .background(tint.copy(alpha = if (theme.style == SurfaceStyle.SOLID) 0.1f else 0.16f))
+            .background(
+                if (theme.style == SurfaceStyle.LIQUID_GLASS) theme.surface.copy(alpha = 0.88f)
+                else Color.Transparent,
+                shape,
+            )
+            .background(tint.copy(alpha = 0.1f), shape)
             .semantics(mergeDescendants = true) { contentDescription = "Source: $label" }
             .padding(horizontal = 8.dp, vertical = 4.dp),
     ) {
