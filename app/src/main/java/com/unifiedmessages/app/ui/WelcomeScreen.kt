@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,7 +33,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
@@ -40,6 +40,9 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.unifiedmessages.app.ui.components.AppSurface
+import com.unifiedmessages.app.ui.components.appHazeSource
+import com.unifiedmessages.app.ui.theme.LocalAppTheme
 
 /** First-launch introduction. It makes no claim that the preview can send or receive messages. */
 @Composable
@@ -47,16 +50,18 @@ fun WelcomeScreen(
     onContinue: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val theme = LocalAppTheme.current
     BoxWithConstraints(
-        modifier = modifier.fillMaxSize().background(Color(0xFF05080F)),
+        modifier = modifier.fillMaxSize().background(theme.welcomeBackground),
     ) {
-        Canvas(Modifier.matchParentSize().clearAndSetSemantics { }) {
+        Canvas(Modifier.matchParentSize().appHazeSource().clearAndSetSemantics { }) {
+            drawRect(theme.welcomeBackground)
             drawRect(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        Color(0xFF5582BD).copy(alpha = 0.78f),
-                        Color(0xFF264771).copy(alpha = 0.45f),
-                        Color.Transparent,
+                        theme.welcomeGlowPrimary.copy(alpha = 0.78f),
+                        theme.welcomeGlowSecondary.copy(alpha = 0.45f),
+                        theme.welcomeBackground.copy(alpha = 0f),
                     ),
                     center = Offset(size.width * 0.50f, size.height * 0.47f),
                     radius = size.width.coerceAtLeast(1f) * 1.03f,
@@ -88,7 +93,7 @@ fun WelcomeScreen(
                     val stroke = size.minDimension * 0.09f
                     repeat(7) { segment ->
                         drawArc(
-                            color = Color.White,
+                            color = theme.welcomeOnBackground,
                             startAngle = -92f + segment * (360f / 7f),
                             sweepAngle = if (segment % 2 == 0) 36f else 39f,
                             useCenter = false,
@@ -101,14 +106,14 @@ fun WelcomeScreen(
                 Spacer(Modifier.height(if (compact) 18.dp else 27.dp))
                 Text(
                     text = "Welcome to chats",
-                    color = Color.White,
+                    color = theme.welcomeOnBackground,
                     style = MaterialTheme.typography.headlineMedium,
                     textAlign = TextAlign.Center,
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = "Take a look around.",
-                    color = Color(0xFFD5DDEB),
+                    color = theme.welcomeSecondary,
                     style = MaterialTheme.typography.bodyLarge,
                     textAlign = TextAlign.Center,
                 )
@@ -120,39 +125,45 @@ fun WelcomeScreen(
             ) {
                 Text(
                     text = "Sample preview · messaging not connected",
-                    color = Color(0xFFD5DDEB),
+                    color = theme.welcomeSecondary,
                     style = MaterialTheme.typography.bodySmall,
                     textAlign = TextAlign.Center,
                 )
                 Spacer(Modifier.height(16.dp))
-                Row(
+                AppSurface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(62.dp)
                         .clip(RoundedCornerShape(34.dp))
-                        .background(Color.White.copy(alpha = 0.12f))
-                        .clickable(role = Role.Button, onClick = onContinue)
-                        .padding(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                        .clickable(role = Role.Button, onClick = onContinue),
+                    shape = RoundedCornerShape(34.dp),
+                    color = theme.welcomeSurface,
+                    contentPadding = PaddingValues(6.dp),
+                    backdropColor = theme.welcomeBackground,
                 ) {
-                    Box(
-                        modifier = Modifier.size(50.dp).background(Color.White, CircleShape),
-                        contentAlignment = Alignment.Center,
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
-                            contentDescription = null,
-                            tint = Color(0xFF0B1019),
+                        Box(
+                            modifier = Modifier.size(50.dp).background(theme.welcomeActionSurface, CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
+                                contentDescription = null,
+                                tint = theme.welcomeOnActionSurface,
+                            )
+                        }
+                        Text(
+                            text = "Get started",
+                            color = theme.welcomeOnBackground,
+                            style = MaterialTheme.typography.titleMedium,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.weight(1f),
                         )
+                        Spacer(Modifier.width(50.dp))
                     }
-                    Text(
-                        text = "Get started",
-                        color = Color.White,
-                        style = MaterialTheme.typography.titleMedium,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.width(50.dp))
                 }
             }
         }

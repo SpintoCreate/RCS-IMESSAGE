@@ -2,7 +2,6 @@ package com.unifiedmessages.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -26,7 +25,6 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,7 +40,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -52,10 +49,14 @@ import com.unifiedmessages.app.data.InboxSearch
 import com.unifiedmessages.app.data.SampleConversationRepository
 import com.unifiedmessages.app.model.Conversation
 import com.unifiedmessages.app.model.MessageSource
+import com.unifiedmessages.app.ui.components.AppCard
+import com.unifiedmessages.app.ui.components.AppFab
+import com.unifiedmessages.app.ui.components.AppSurface
+import com.unifiedmessages.app.ui.components.AppTopBar
 import com.unifiedmessages.app.ui.components.ContactAvatar
 import com.unifiedmessages.app.ui.components.SourceBadge
-import com.unifiedmessages.app.ui.theme.LocalUnifiedPalette
-import com.unifiedmessages.app.ui.theme.VisualStyle
+import com.unifiedmessages.app.ui.theme.LocalAppTheme
+import com.unifiedmessages.app.ui.theme.SurfaceStyle
 
 @Composable
 fun InboxScreen(
@@ -64,7 +65,7 @@ fun InboxScreen(
     selectedId: String?,
     modifier: Modifier = Modifier,
 ) {
-    val palette = LocalUnifiedPalette.current
+    val theme = LocalAppTheme.current
     var query by rememberSaveable { mutableStateOf("") }
     var sourceName by rememberSaveable { mutableStateOf("ALL") }
     var settingsMenuOpen by rememberSaveable { mutableStateOf(false) }
@@ -77,66 +78,86 @@ fun InboxScreen(
 
     Box(modifier = modifier) {
         Column(Modifier.fillMaxSize()) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 10.dp, top = 22.dp, bottom = 15.dp),
+            AppTopBar(
+                modifier = Modifier.fillMaxWidth(),
+                color = if (theme.style == SurfaceStyle.SOLID) theme.background else null,
             ) {
-                Text(
-                    text = "Chats",
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = palette.primaryText,
-                    modifier = Modifier.weight(1f),
-                )
-                Box {
-                    IconButton(onClick = { settingsMenuOpen = true }, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Outlined.MoreVert, contentDescription = "More options", tint = palette.primaryText)
-                    }
-                    DropdownMenu(expanded = settingsMenuOpen, onDismissRequest = { settingsMenuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Settings") },
-                            leadingIcon = { Icon(Icons.Outlined.Settings, contentDescription = null) },
-                            onClick = {
-                                settingsMenuOpen = false
-                                onSettings()
-                            },
-                        )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 10.dp, top = 22.dp, bottom = 15.dp),
+                ) {
+                    Text(
+                        text = "Chats",
+                        style = MaterialTheme.typography.headlineLarge,
+                        color = theme.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Box {
+                        IconButton(onClick = { settingsMenuOpen = true }, modifier = Modifier.size(48.dp)) {
+                            Icon(Icons.Outlined.MoreVert, contentDescription = "More options", tint = theme.onSurface)
+                        }
+                        DropdownMenu(expanded = settingsMenuOpen, onDismissRequest = { settingsMenuOpen = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Settings") },
+                                leadingIcon = { Icon(Icons.Outlined.Settings, contentDescription = null) },
+                                onClick = {
+                                    settingsMenuOpen = false
+                                    onSettings()
+                                },
+                            )
+                        }
                     }
                 }
             }
 
-            TextField(
-                value = query,
-                onValueChange = { query = it },
+            AppSurface(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                placeholder = { Text("Search chats") },
-                leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = "" }) {
-                            Icon(Icons.Outlined.Close, contentDescription = "Clear search")
-                        }
-                    }
-                },
-                singleLine = true,
                 shape = CircleShape,
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = palette.surface,
-                    unfocusedContainerColor = palette.surface,
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                ),
-            )
+                color = theme.surface,
+            ) {
+                TextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Search chats") },
+                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (query.isNotEmpty()) {
+                            IconButton(onClick = { query = "" }) {
+                                Icon(Icons.Outlined.Close, contentDescription = "Clear search")
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    shape = CircleShape,
+                    colors = TextFieldDefaults.colors(
+                        focusedTextColor = theme.onSurface,
+                        unfocusedTextColor = theme.onSurface,
+                        focusedPlaceholderColor = theme.onSurfaceVariant,
+                        unfocusedPlaceholderColor = theme.onSurfaceVariant,
+                        focusedLeadingIconColor = theme.onSurfaceVariant,
+                        unfocusedLeadingIconColor = theme.onSurfaceVariant,
+                        focusedTrailingIconColor = theme.onSurfaceVariant,
+                        unfocusedTrailingIconColor = theme.onSurfaceVariant,
+                        cursorColor = theme.accent,
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                    ),
+                )
+            }
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth().padding(start = 21.dp, end = 16.dp, top = 7.dp),
             ) {
-                Box(Modifier.size(6.dp).background(palette.accent, CircleShape))
+                Box(Modifier.size(6.dp).background(theme.accent, CircleShape))
                 Spacer(Modifier.width(7.dp))
                 Text(
                     text = "Sample chats only",
                     style = MaterialTheme.typography.bodySmall,
-                    color = palette.secondaryText,
+                    color = theme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
                 Box {
@@ -144,7 +165,7 @@ fun InboxScreen(
                         Text(
                             text = (source?.label ?: "All sources") + "  ⌄",
                             style = MaterialTheme.typography.labelMedium,
-                            color = palette.primaryText,
+                            color = theme.onSurface,
                         )
                     }
                     DropdownMenu(expanded = sourceMenuOpen, onDismissRequest = { sourceMenuOpen = false }) {
@@ -166,7 +187,7 @@ fun InboxScreen(
                     Text(
                         text = "No sample chats match your search.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = palette.secondaryText,
+                        color = theme.onSurfaceVariant,
                     )
                 }
             } else {
@@ -190,14 +211,18 @@ fun InboxScreen(
             }
         }
 
-        FloatingActionButton(
+        AppFab(
             onClick = { showNewMessageInfo = true },
+            contentDescription = "New message information",
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 22.dp, bottom = 22.dp).size(58.dp),
             shape = CircleShape,
-            containerColor = palette.accent,
-            contentColor = Color.White,
         ) {
-            Icon(Icons.Outlined.Add, contentDescription = "New message information", modifier = Modifier.size(27.dp))
+            Icon(
+                Icons.Outlined.Add,
+                contentDescription = null,
+                tint = theme.onAccent,
+                modifier = Modifier.align(Alignment.Center).size(27.dp),
+            )
         }
     }
 
@@ -209,18 +234,18 @@ fun InboxScreen(
             confirmButton = {
                 TextButton(onClick = { showNewMessageInfo = false }) { Text("Got it") }
             },
-            containerColor = palette.surface,
+            containerColor = theme.surface,
         )
     }
 }
 
 @Composable
 private fun SectionLabel(label: String) {
-    val palette = LocalUnifiedPalette.current
+    val theme = LocalAppTheme.current
     Text(
         text = label,
         style = MaterialTheme.typography.bodySmall,
-        color = palette.secondaryText,
+        color = theme.onSurfaceVariant,
         modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 8.dp),
     )
 }
@@ -231,24 +256,27 @@ private fun ConversationGroup(
     selectedId: String?,
     onConversationSelected: (String) -> Unit,
 ) {
-    val palette = LocalUnifiedPalette.current
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(palette.surface),
+    val theme = LocalAppTheme.current
+    AppCard(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(18.dp),
+        color = theme.surface,
+        contentPadding = PaddingValues(0.dp),
     ) {
-        conversations.forEachIndexed { index, conversation ->
-            ConversationRow(
-                conversation = conversation,
-                selected = conversation.id == selectedId,
-                onClick = { onConversationSelected(conversation.id) },
-            )
-            if (index < conversations.lastIndex) {
-                HorizontalDivider(
-                    modifier = Modifier.padding(start = 68.dp, end = 14.dp),
-                    thickness = 1.dp,
-                    color = palette.outline.copy(alpha = 0.65f),
+        Column {
+            conversations.forEachIndexed { index, conversation ->
+                ConversationRow(
+                    conversation = conversation,
+                    selected = conversation.id == selectedId,
+                    onClick = { onConversationSelected(conversation.id) },
                 )
+                if (index < conversations.lastIndex) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = 68.dp, end = 14.dp),
+                        thickness = 1.dp,
+                        color = theme.outline.copy(alpha = 0.65f),
+                    )
+                }
             }
         }
     }
@@ -256,12 +284,11 @@ private fun ConversationGroup(
 
 @Composable
 private fun ConversationRow(conversation: Conversation, selected: Boolean, onClick: () -> Unit) {
-    val palette = LocalUnifiedPalette.current
-    val selectedColor = if (palette.style == VisualStyle.CHATS) Color(0xFFF1F4FF) else palette.surfaceElevated
+    val theme = LocalAppTheme.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth()
-            .background(if (selected) selectedColor else palette.surface)
+            .background(if (selected) theme.selectedSurface else Color.Transparent)
             .clickable(role = Role.Button, onClickLabel = "Open ${conversation.title} conversation", onClick = onClick)
             .padding(horizontal = 11.dp, vertical = 12.dp),
     ) {
@@ -273,7 +300,7 @@ private fun ConversationRow(conversation: Conversation, selected: Boolean, onCli
                     text = conversation.title,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = if (conversation.unreadCount > 0) FontWeight.SemiBold else FontWeight.Medium,
-                    color = palette.primaryText,
+                    color = theme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
@@ -282,7 +309,7 @@ private fun ConversationRow(conversation: Conversation, selected: Boolean, onCli
                 Text(
                     text = conversation.timestamp,
                     style = MaterialTheme.typography.labelSmall,
-                    color = palette.secondaryText,
+                    color = theme.onSurfaceVariant,
                     maxLines = 1,
                 )
             }
@@ -293,7 +320,7 @@ private fun ConversationRow(conversation: Conversation, selected: Boolean, onCli
                 Text(
                     text = conversation.preview,
                     style = MaterialTheme.typography.bodySmall,
-                    color = palette.secondaryText,
+                    color = theme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
@@ -301,13 +328,13 @@ private fun ConversationRow(conversation: Conversation, selected: Boolean, onCli
                 if (conversation.unreadCount > 0) {
                     Spacer(Modifier.width(5.dp))
                     Box(
-                        modifier = Modifier.size(20.dp).background(palette.accent, CircleShape),
+                        modifier = Modifier.size(20.dp).background(theme.accent, CircleShape),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
                             text = conversation.unreadCount.toString(),
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color.White,
+                            color = theme.onAccent,
                         )
                     }
                 }

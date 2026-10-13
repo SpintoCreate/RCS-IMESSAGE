@@ -1,7 +1,6 @@
 package com.unifiedmessages.app.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -28,10 +27,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.unifiedmessages.app.ui.theme.LocalUnifiedPalette
-import com.unifiedmessages.app.ui.theme.VisualStyle
+import com.unifiedmessages.app.ui.theme.LocalAppTheme
+import com.unifiedmessages.app.ui.theme.SurfaceStyle
 
-/** A card that follows the selected appearance without blurring its text or controls. */
+/** Kept for existing callers while screens move to the semantic AppCard wrapper. */
 @Composable
 fun StyleSurface(
     modifier: Modifier = Modifier,
@@ -39,26 +38,11 @@ fun StyleSurface(
     contentPadding: PaddingValues = PaddingValues(16.dp),
     content: @Composable BoxScope.() -> Unit,
 ) {
-    val palette = LocalUnifiedPalette.current
-    val glass = palette.style == VisualStyle.LIQUID_GLASS
-    val surfaceModifier = if (glass) {
-        val background = Brush.linearGradient(
-            listOf(
-                palette.surfaceHighlight.copy(alpha = 0.92f),
-                palette.surfaceElevated.copy(alpha = 0.86f),
-                palette.surface.copy(alpha = 0.92f),
-            ),
-        )
-        Modifier.background(background).border(1.dp, palette.outline.copy(alpha = 0.72f), shape)
-    } else {
-        Modifier.background(palette.surface)
-    }
-
-    Box(
-        modifier = modifier
-            .clip(shape)
-            .then(surfaceModifier)
-            .padding(contentPadding),
+    AppCard(
+        modifier = modifier,
+        shape = shape,
+        color = LocalAppTheme.current.surface,
+        contentPadding = contentPadding,
         content = content,
     )
 }
@@ -69,7 +53,7 @@ fun SourceBadge(
     source: String,
     modifier: Modifier = Modifier,
 ) {
-    val palette = LocalUnifiedPalette.current
+    val theme = LocalAppTheme.current
     val label = when (source.trim().uppercase()) {
         "IMESSAGE" -> "iMessage"
         "RCS" -> "RCS"
@@ -77,23 +61,17 @@ fun SourceBadge(
         else -> source.trim()
     }
     val tint = when (label) {
-        "iMessage" -> palette.imessage
-        "RCS" -> palette.rcs
-        "SMS" -> palette.sms
-        else -> palette.secondaryText
+        "iMessage" -> theme.imessage
+        "RCS" -> theme.rcs
+        "SMS" -> theme.sms
+        else -> theme.onSurfaceVariant
     }
     val shape = RoundedCornerShape(8.dp)
-    val borderModifier = if (palette.style == VisualStyle.LIQUID_GLASS) {
-        Modifier.border(1.dp, tint.copy(alpha = 0.48f), shape)
-    } else {
-        Modifier
-    }
 
     Box(
         modifier = modifier
             .clip(shape)
-            .background(tint.copy(alpha = if (palette.style == VisualStyle.CHATS) 0.1f else 0.16f))
-            .then(borderModifier)
+            .background(tint.copy(alpha = if (theme.style == SurfaceStyle.SOLID) 0.1f else 0.16f))
             .semantics(mergeDescendants = true) { contentDescription = "Source: $label" }
             .padding(horizontal = 8.dp, vertical = 4.dp),
     ) {
@@ -117,8 +95,8 @@ private val avatarSwatches = listOf(
 @Composable
 fun ContactAvatar(
     text: String,
-    size: Dp = 48.dp,
     modifier: Modifier = Modifier,
+    size: Dp = 48.dp,
 ) {
     val initials = text.trim().uppercase().take(3).ifEmpty { "?" }
     val (start, end) = avatarSwatches[Math.floorMod(initials.hashCode(), avatarSwatches.size)]
@@ -159,7 +137,7 @@ fun DotMatrixAccent(
     rows: Int = 2,
     dotSize: Dp = 2.dp,
     dotSpacing: Dp = 5.dp,
-    color: Color = LocalUnifiedPalette.current.secondaryText.copy(alpha = 0.45f),
+    color: Color = LocalAppTheme.current.onSurfaceVariant.copy(alpha = 0.45f),
 ) {
     Column(
         modifier = modifier.clearAndSetSemantics { },

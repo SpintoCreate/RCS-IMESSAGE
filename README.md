@@ -1,6 +1,6 @@
 # UnifiedMessages
 
-UnifiedMessages is a **free, native Android interface preview** built with Kotlin, Jetpack Compose, and Material 3. It is designed for a Nothing Phone (2). The default Chats appearance has a clean light inbox, soft message bubbles, and vivid blue accents; Liquid Glass remains an optional appearance.
+UnifiedMessages is a **free, native Android interface preview** built with Kotlin, Jetpack Compose, and Material 3. It is designed for a Nothing Phone (2). Its default appearance keeps the current light Chats design with solid surfaces and the original blue accent.
 
 This first version contains **fictional sample conversations only**. It does not access your contacts or messages. It does not connect to iMessage or RCS, send SMS, or send anything typed in the composer. The source badges show what future conversations could look like; they are labels on sample data, not live connections.
 
@@ -23,16 +23,18 @@ If the phone does not appear, reconnect the cable, unlock the phone, approve the
 - Browse pinned and other sample chats and see iMessage, RCS, and SMS source labels.
 - Search names, sample messages, or source names; use the source menu to filter chats.
 - Open a conversation and type in the draft field. The send control is disabled because messaging is not connected.
-- Open the top-right menu, then **Settings**, to switch between Chats and Liquid Glass appearances. Your selection is saved on the device.
+- Open the top-right menu, then **Settings**. Under **Appearance**, choose **Solid** or **Liquid Glass** surfaces, **Light**, **Dark**, or **System** brightness, and one of ten accent colors. Tap **Custom** to adjust hue, saturation, and color brightness. The live preview and app update as you choose; the three settings are saved on your phone with Android DataStore.
 - On a wider screen, the inbox and conversation appear side by side.
+
+Liquid Glass places translucent surfaces over a built-in gradient background. Background blur uses the free Haze library on Android 12 (API 31) and newer. On Android 10 or 11, the same appearance uses a more opaque tint without blur. **System** brightness follows your phone's light or dark setting. No wallpaper selection is needed to use Glass.
 
 ## Project structure
 
 - `app/src/main/java/com/unifiedmessages/app/model/` — conversation and message models, with explicit source types.
-- `app/src/main/java/com/unifiedmessages/app/data/` — fictional sample content and inbox filtering.
+- `app/src/main/java/com/unifiedmessages/app/data/` — fictional sample content, inbox filtering, and DataStore appearance settings.
 - `app/src/main/java/com/unifiedmessages/app/ui/` — Compose screens and navigation.
-- `app/src/main/java/com/unifiedmessages/app/ui/theme/` — Chats and Liquid Glass palettes.
-- `app/src/main/java/com/unifiedmessages/app/ui/components/` — reusable surfaces, source badges, and dot details.
+- `app/src/main/java/com/unifiedmessages/app/ui/theme/` — semantic palettes for all style and brightness combinations.
+- `app/src/main/java/com/unifiedmessages/app/ui/components/` — reusable solid and glass surfaces, source badges, and dot details.
 
 The sample repository is isolated from the screens so a future, separately tested connector can replace it. Conversations retain unique IDs and source labels; two chats with the same contact are kept separate when they use different transports.
 
