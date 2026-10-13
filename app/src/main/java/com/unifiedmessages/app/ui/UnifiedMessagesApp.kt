@@ -36,8 +36,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.unifiedmessages.app.data.AppearanceRepository
-import com.unifiedmessages.app.data.SampleConversationRepository
+import com.unifiedmessages.app.data.repository.DeletedMessagePreferences
 import com.unifiedmessages.app.ui.components.AppBackdrop
 import com.unifiedmessages.app.ui.components.DotMatrixAccent
 import com.unifiedmessages.app.ui.components.LocalAppHazeState
@@ -46,13 +47,36 @@ import com.unifiedmessages.app.ui.theme.Brightness
 import com.unifiedmessages.app.ui.theme.LocalAppTheme
 import com.unifiedmessages.app.ui.theme.SurfaceStyle
 import com.unifiedmessages.app.ui.theme.UnifiedMessagesTheme
+import com.unifiedmessages.app.ui.viewmodel.ConversationViewModel
+import com.unifiedmessages.app.ui.viewmodel.InboxViewModel
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
 import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface MessageDisplayEntryPoint {
+    fun deletedMessagePreferences(): DeletedMessagePreferences
+}
+
 @Composable
 fun UnifiedMessagesApp() {
     val context = LocalContext.current
+    val inboxViewModel: InboxViewModel = hiltViewModel()
+    val conversationViewModel: ConversationViewModel = hiltViewModel()
+    val inboxState by inboxViewModel.uiState.collectAsState()
+    val conversationState by conversationViewModel.uiState.collectAsState()
+    val deletedMessagePreferences = remember(context) {
+        EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            MessageDisplayEntryPoint::class.java,
+        ).deletedMessagePreferences()
+    }
+    val showSenderDeletedMessages by deletedMessagePreferences.showSenderDeletedMessages.collectAsState(initial = true)
     val preferences = remember(context) {
         context.getSharedPreferences("unified_messages_display", Context.MODE_PRIVATE)
     }
@@ -69,7 +93,11 @@ fun UnifiedMessagesApp() {
     }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
-    val selected = selectedId?.let(SampleConversationRepository::findById)
+    LaunchedEffect(selectedId) { conversationViewModel.selectThread(selectedId) }
+    val selected = selectedId?.let { id ->
+        conversationState.conversation?.takeIf { it.id == id }
+            ?: inboxState.conversations.firstOrNull { it.id == id }
+    }
 
     BackHandler(enabled = settingsOpen || selectedId != null) {
         if (settingsOpen) settingsOpen = false else selectedId = null
@@ -148,13 +176,25 @@ fun UnifiedMessagesApp() {
                                     }
                                 }
                             },
+                            showSenderDeletedMessages = showSenderDeletedMessages,
+                            onShowSenderDeletedMessagesChange = { show ->
+                                scope.launch { deletedMessagePreferences.setShowSenderDeletedMessages(show) }
+                            },
                             onBack = { settingsOpen = false },
                             modifier = Modifier.fillMaxSize(),
                         )
                     } else if (expanded) {
                         Row(Modifier.fillMaxSize()) {
                             InboxScreen(
+                                conversations = inboxState.conversations,
+                                query = inboxState.query,
+                                onQueryChange = inboxViewModel::setQuery,
+                                source = inboxState.source,
+                                onSourceChange = inboxViewModel::setSource,
                                 onConversationSelected = { selectedId = it },
+                                onPinToggle = inboxViewModel::setPinned,
+                                onNewMessage = {},
+                                canStartNewMessage = false,
                                 onSettings = { settingsOpen = true },
                                 selectedId = selectedId,
                                 modifier = Modifier.width(390.dp),
@@ -168,6 +208,10 @@ fun UnifiedMessagesApp() {
                                 } else {
                                     ConversationScreen(
                                         conversation = selected,
+                                        searchQuery = conversationState.searchQuery,
+                                        onSearchQueryChange = conversationViewModel::setSearchQuery,
+                                        canSend = false,
+                                        onSend = {},
                                         onBack = { selectedId = null },
                                         showBack = false,
                                         modifier = Modifier.fillMaxSize(),
@@ -181,21 +225,36 @@ fun UnifiedMessagesApp() {
                             label = "Conversation navigation",
                             modifier = Modifier.fillMaxSize(),
                         ) { conversationId ->
-                            val conversation = conversationId?.let(SampleConversationRepository::findById)
-                            if (conversation == null) {
+                            val conversation = conversationState.conversation?.takeIf { it.id == conversationId }
+                                ?: inboxState.conversations.firstOrNull { it.id == conversationId }
+                            if (conversationId == null) {
                                 InboxScreen(
+                                    conversations = inboxState.conversations,
+                                    query = inboxState.query,
+                                    onQueryChange = inboxViewModel::setQuery,
+                                    source = inboxState.source,
+                                    onSourceChange = inboxViewModel::setSource,
                                     onConversationSelected = { selectedId = it },
+                                    onPinToggle = inboxViewModel::setPinned,
+                                    onNewMessage = {},
+                                    canStartNewMessage = false,
                                     onSettings = { settingsOpen = true },
                                     selectedId = null,
                                     modifier = Modifier.fillMaxSize(),
                                 )
-                            } else {
+                            } else if (conversation != null) {
                                 ConversationScreen(
                                     conversation = conversation,
+                                    searchQuery = conversationState.searchQuery,
+                                    onSearchQueryChange = conversationViewModel::setSearchQuery,
+                                    canSend = false,
+                                    onSend = {},
                                     onBack = { selectedId = null },
                                     showBack = true,
                                     modifier = Modifier.fillMaxSize(),
                                 )
+                            } else {
+                                EmptyConversationHint()
                             }
                         }
                     }
@@ -221,7 +280,7 @@ private fun EmptyConversationHint() {
                 modifier = Modifier.padding(top = 28.dp),
             )
             Text(
-                text = "Your sample conversation will appear here. Messaging is not connected.",
+                text = "Choose a conversation to see its messages.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = theme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 10.dp),

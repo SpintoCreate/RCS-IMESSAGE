@@ -53,6 +53,10 @@ import com.unifiedmessages.app.ui.theme.SurfaceStyle
 @Composable
 fun ConversationScreen(
     conversation: Conversation,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    canSend: Boolean,
+    onSend: (String) -> Unit,
     onBack: () -> Unit,
     showBack: Boolean,
     modifier: Modifier = Modifier,
@@ -60,10 +64,7 @@ fun ConversationScreen(
     val palette = LocalAppTheme.current
     var draft by rememberSaveable(conversation.id) { mutableStateOf("") }
     var searchOpen by rememberSaveable(conversation.id) { mutableStateOf(false) }
-    var searchQuery by rememberSaveable(conversation.id) { mutableStateOf("") }
-    val visibleMessages = if (searchQuery.isBlank()) conversation.messages else {
-        conversation.messages.filter { it.text.contains(searchQuery.trim(), ignoreCase = true) }
-    }
+    val visibleMessages = conversation.messages
 
     val screenModifier = if (palette.style == SurfaceStyle.SOLID) {
         modifier.background(palette.background)
@@ -110,13 +111,13 @@ fun ConversationScreen(
             IconButton(
                 onClick = {
                     searchOpen = !searchOpen
-                    if (!searchOpen) searchQuery = ""
+                    if (!searchOpen) onSearchQueryChange("")
                 },
                 modifier = Modifier.align(Alignment.TopEnd).size(48.dp),
             ) {
                 Icon(
                     if (searchOpen) Icons.Outlined.Close else Icons.Outlined.Search,
-                    contentDescription = if (searchOpen) "Close conversation search" else "Search sample messages",
+                    contentDescription = if (searchOpen) "Close conversation search" else "Search messages",
                     tint = palette.onSurface,
                 )
             }
@@ -130,9 +131,9 @@ fun ConversationScreen(
             ) {
                 TextField(
                     value = searchQuery,
-                    onValueChange = { searchQuery = it },
+                    onValueChange = onSearchQueryChange,
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Search sample messages") },
+                    placeholder = { Text("Search messages") },
                     singleLine = true,
                     shape = RoundedCornerShape(18.dp),
                     leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
@@ -156,9 +157,9 @@ fun ConversationScreen(
             contentPadding = PaddingValues(horizontal = 18.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.Bottom,
         ) {
-            item(key = "sample-day-label") {
+            item(key = "conversation-day-label") {
                 Text(
-                    text = "SAMPLE CONVERSATION",
+                    text = "CONVERSATION",
                     color = palette.onSurfaceVariant,
                     style = MaterialTheme.typography.labelSmall,
                     textAlign = TextAlign.Center,
@@ -168,7 +169,7 @@ fun ConversationScreen(
             if (visibleMessages.isEmpty()) {
                 item(key = "no-results") {
                     Text(
-                        text = "No sample messages match your search.",
+                        text = if (searchQuery.isNotBlank()) "No messages match your search." else "No messages yet.",
                         color = palette.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
                         textAlign = TextAlign.Center,
@@ -189,7 +190,7 @@ fun ConversationScreen(
         ) {
             Column {
                 Text(
-                    text = "Preview only · messages cannot be sent",
+                    text = if (canSend) "SMS" else "Messaging unavailable for this chat",
                     style = MaterialTheme.typography.labelSmall,
                     color = palette.onSurfaceVariant,
                     modifier = Modifier.padding(start = 12.dp, bottom = 8.dp),
@@ -204,7 +205,7 @@ fun ConversationScreen(
                             value = draft,
                             onValueChange = { draft = it },
                             modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("Write a draft") },
+                            placeholder = { Text(if (canSend) "Message" else "Write a draft") },
                             minLines = 1,
                             maxLines = 4,
                             shape = RoundedCornerShape(28.dp),
@@ -225,7 +226,11 @@ fun ConversationScreen(
                     AppFab(
                         modifier = Modifier.size(52.dp),
                         shape = CircleShape,
-                        contentDescription = "Send unavailable in preview mode",
+                        onClick = if (canSend && draft.isNotBlank()) ({
+                            onSend(draft.trim())
+                            draft = ""
+                        }) else null,
+                        contentDescription = if (canSend) "Send message" else "Send unavailable",
                     ) {
                         Icon(
                             Icons.AutoMirrored.Outlined.Send,

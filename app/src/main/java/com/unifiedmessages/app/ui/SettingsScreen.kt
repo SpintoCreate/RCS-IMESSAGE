@@ -29,6 +29,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -63,6 +64,8 @@ fun SettingsScreen(
     onStyleChange: (SurfaceStyle) -> Unit,
     onBrightnessChange: (Brightness) -> Unit,
     onAccentChange: (Int) -> Unit,
+    showSenderDeletedMessages: Boolean,
+    onShowSenderDeletedMessagesChange: (Boolean) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -166,6 +169,30 @@ fun SettingsScreen(
 
         AppearanceHeading("LIVE PREVIEW", modifier = Modifier.padding(top = 27.dp))
         AppearancePreview(modifier = Modifier.fillMaxWidth())
+
+        AppearanceHeading("MESSAGE DISPLAY", modifier = Modifier.padding(top = 35.dp))
+        StyleSurface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Show sender deletions", style = MaterialTheme.typography.titleMedium, color = theme.onSurface)
+                    Text(
+                        "Keep a 'Deleted by sender' marker in the conversation.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = theme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 5.dp),
+                    )
+                }
+                Switch(
+                    checked = showSenderDeletedMessages,
+                    onCheckedChange = onShowSenderDeletedMessagesChange,
+                    modifier = Modifier.semantics { contentDescription = "Show messages deleted by sender" },
+                )
+            }
+        }
 
         AppearanceHeading("ABOUT THIS PREVIEW", modifier = Modifier.padding(top = 35.dp))
         StyleSurface(

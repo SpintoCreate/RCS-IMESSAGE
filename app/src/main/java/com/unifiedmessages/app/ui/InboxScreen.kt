@@ -1,7 +1,7 @@
 package com.unifiedmessages.app.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -34,9 +34,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,8 +45,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.unifiedmessages.app.data.InboxSearch
-import com.unifiedmessages.app.data.SampleConversationRepository
 import com.unifiedmessages.app.model.Conversation
 import com.unifiedmessages.app.model.MessageSource
 import com.unifiedmessages.app.ui.components.AppCard
@@ -60,21 +58,25 @@ import com.unifiedmessages.app.ui.theme.SurfaceStyle
 
 @Composable
 fun InboxScreen(
+    conversations: List<Conversation>,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    source: MessageSource?,
+    onSourceChange: (MessageSource?) -> Unit,
     onConversationSelected: (String) -> Unit,
+    onPinToggle: (String, Boolean) -> Unit,
+    onNewMessage: () -> Unit,
+    canStartNewMessage: Boolean,
     onSettings: () -> Unit,
     selectedId: String?,
     modifier: Modifier = Modifier,
 ) {
     val theme = LocalAppTheme.current
-    var query by rememberSaveable { mutableStateOf("") }
-    var sourceName by rememberSaveable { mutableStateOf("ALL") }
     var settingsMenuOpen by rememberSaveable { mutableStateOf(false) }
     var sourceMenuOpen by rememberSaveable { mutableStateOf(false) }
     var showNewMessageInfo by rememberSaveable { mutableStateOf(false) }
-    val source = MessageSource.entries.firstOrNull { it.name == sourceName }
-    val results = InboxSearch.filter(SampleConversationRepository.conversations, query, source)
-    val pinned = results.filter { it.isPinned }
-    val other = results.filterNot { it.isPinned }
+    val pinned = conversations.filter { it.isPinned }
+    val other = conversations.filterNot { it.isPinned }
 
     Box(modifier = modifier) {
         Column(Modifier.fillMaxSize()) {
@@ -117,13 +119,13 @@ fun InboxScreen(
             ) {
                 TextField(
                     value = query,
-                    onValueChange = { query = it },
+                    onValueChange = onQueryChange,
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text("Search chats") },
                     leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
                     trailingIcon = {
                         if (query.isNotEmpty()) {
-                            IconButton(onClick = { query = "" }) {
+                            IconButton(onClick = { onQueryChange("") }) {
                                 Icon(Icons.Outlined.Close, contentDescription = "Clear search")
                             }
                         }
@@ -155,7 +157,7 @@ fun InboxScreen(
                 Box(Modifier.size(6.dp).background(theme.accent, CircleShape))
                 Spacer(Modifier.width(7.dp))
                 Text(
-                    text = "Sample chats only",
+                    text = "Messages",
                     style = MaterialTheme.typography.bodySmall,
                     color = theme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
@@ -169,11 +171,12 @@ fun InboxScreen(
                         )
                     }
                     DropdownMenu(expanded = sourceMenuOpen, onDismissRequest = { sourceMenuOpen = false }) {
-                        (listOf(null) + MessageSource.entries).forEach { option ->
+                        val sourceOptions = listOf<MessageSource?>(null, MessageSource.SMS, MessageSource.RCS, MessageSource.IMESSAGE)
+                        sourceOptions.forEach { option ->
                             DropdownMenuItem(
                                 text = { Text(option?.label ?: "All sources") },
                                 onClick = {
-                                    sourceName = option?.name ?: "ALL"
+                                    onSourceChange(option)
                                     sourceMenuOpen = false
                                 },
                             )
@@ -182,10 +185,10 @@ fun InboxScreen(
                 }
             }
 
-            if (results.isEmpty()) {
+            if (conversations.isEmpty()) {
                 Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                     Text(
-                        text = "No sample chats match your search.",
+                        text = if (query.isNotBlank() || source != null) "No chats match your search." else "No messages yet.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = theme.onSurfaceVariant,
                     )
@@ -198,13 +201,13 @@ fun InboxScreen(
                     if (pinned.isNotEmpty()) {
                         item {
                             SectionLabel("Pinned")
-                            ConversationGroup(pinned, selectedId, onConversationSelected)
+                            ConversationGroup(pinned, selectedId, onConversationSelected, onPinToggle)
                         }
                     }
                     if (other.isNotEmpty()) {
                         item {
                             SectionLabel("All")
-                            ConversationGroup(other, selectedId, onConversationSelected)
+                            ConversationGroup(other, selectedId, onConversationSelected, onPinToggle)
                         }
                     }
                 }
@@ -212,8 +215,8 @@ fun InboxScreen(
         }
 
         AppFab(
-            onClick = { showNewMessageInfo = true },
-            contentDescription = "New message information",
+            onClick = { if (canStartNewMessage) onNewMessage() else showNewMessageInfo = true },
+            contentDescription = "New message",
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 22.dp, bottom = 22.dp).size(58.dp),
             shape = CircleShape,
         ) {
@@ -229,8 +232,8 @@ fun InboxScreen(
     if (showNewMessageInfo) {
         AlertDialog(
             onDismissRequest = { showNewMessageInfo = false },
-            title = { Text("Preview only") },
-            text = { Text("New messages are unavailable. These are fictional sample chats; messaging is not connected yet.") },
+            title = { Text("SMS unavailable") },
+            text = { Text("Set UnifiedMessages as your default SMS app to start a conversation.") },
             confirmButton = {
                 TextButton(onClick = { showNewMessageInfo = false }) { Text("Got it") }
             },
@@ -255,6 +258,7 @@ private fun ConversationGroup(
     conversations: List<Conversation>,
     selectedId: String?,
     onConversationSelected: (String) -> Unit,
+    onPinToggle: (String, Boolean) -> Unit,
 ) {
     val theme = LocalAppTheme.current
     AppCard(
@@ -269,6 +273,7 @@ private fun ConversationGroup(
                     conversation = conversation,
                     selected = conversation.id == selectedId,
                     onClick = { onConversationSelected(conversation.id) },
+                    onPinToggle = { onPinToggle(conversation.id, !conversation.isPinned) },
                 )
                 if (index < conversations.lastIndex) {
                     HorizontalDivider(
@@ -283,13 +288,24 @@ private fun ConversationGroup(
 }
 
 @Composable
-private fun ConversationRow(conversation: Conversation, selected: Boolean, onClick: () -> Unit) {
+private fun ConversationRow(
+    conversation: Conversation,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onPinToggle: () -> Unit,
+) {
     val theme = LocalAppTheme.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth()
             .background(if (selected) theme.selectedSurface else Color.Transparent)
-            .clickable(role = Role.Button, onClickLabel = "Open ${conversation.title} conversation", onClick = onClick)
+            .combinedClickable(
+                role = Role.Button,
+                onClickLabel = "Open ${conversation.title} conversation",
+                onLongClickLabel = if (conversation.isPinned) "Unpin ${conversation.title}" else "Pin ${conversation.title}",
+                onClick = onClick,
+                onLongClick = onPinToggle,
+            )
             .padding(horizontal = 11.dp, vertical = 12.dp),
     ) {
         ContactAvatar(text = conversation.avatarText, size = 44.dp)

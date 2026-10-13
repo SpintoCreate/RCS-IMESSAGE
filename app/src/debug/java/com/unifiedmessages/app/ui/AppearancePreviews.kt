@@ -57,7 +57,15 @@ private fun InboxAppearancePreview(
 ) {
     AppearancePreviewFrame(settings) {
         InboxScreen(
+            conversations = SampleConversationRepository.conversations,
+            query = "",
+            onQueryChange = {},
+            source = null,
+            onSourceChange = {},
             onConversationSelected = {},
+            onPinToggle = { _, _ -> },
+            onNewMessage = {},
+            canStartNewMessage = false,
             onSettings = {},
             selectedId = null,
             modifier = Modifier.fillMaxSize(),
@@ -73,6 +81,10 @@ private fun ConversationAppearancePreview(
     AppearancePreviewFrame(settings) {
         ConversationScreen(
             conversation = SampleConversationRepository.conversations.first(),
+            searchQuery = "",
+            onSearchQueryChange = {},
+            canSend = false,
+            onSend = {},
             onBack = {},
             showBack = true,
             modifier = Modifier.fillMaxSize(),

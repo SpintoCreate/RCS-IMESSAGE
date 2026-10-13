@@ -1,10 +1,11 @@
 package com.unifiedmessages.app.model
 
-/** The transport for a conversation. This is display data until a real connector exists. */
+/** The source shown in the existing chat badges. Provider integrations map to this display value. */
 enum class MessageSource(val label: String) {
     IMESSAGE("iMessage"),
     RCS("RCS"),
     SMS("SMS"),
+    OTHER("Other"),
 }
 
 data class ChatMessage(
@@ -23,6 +24,8 @@ data class Conversation(
     val unreadCount: Int,
     val isPinned: Boolean = false,
     val messages: List<ChatMessage>,
+    /** Inbox summaries avoid loading every message merely to show the latest preview. */
+    val previewText: String? = null,
 ) {
-    val preview: String get() = messages.lastOrNull()?.text.orEmpty()
+    val preview: String get() = previewText ?: messages.lastOrNull()?.text.orEmpty()
 }
