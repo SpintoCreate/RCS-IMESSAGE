@@ -18,7 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -84,7 +83,7 @@ fun AppBackdrop(modifier: Modifier = Modifier) {
     }
 }
 
-private enum class SurfaceRole { DEFAULT, CARD, INCOMING, OUTGOING, FAB }
+private enum class SurfaceRole { DEFAULT, CARD, INCOMING, OUTGOING, FAB, TOP_BAR }
 
 /** The visual treatment is applied inside the caller's modifier, preserving screen layout. */
 @Composable
@@ -105,6 +104,7 @@ private fun SurfaceLayer(
         SurfaceRole.INCOMING -> theme.bubbleIncoming
         SurfaceRole.OUTGOING -> theme.bubbleOutgoing
         SurfaceRole.FAB -> theme.accent
+        SurfaceRole.TOP_BAR -> theme.background
     }
     val contentColor = when (role) {
         SurfaceRole.INCOMING -> theme.onBubbleIncoming
@@ -112,34 +112,52 @@ private fun SurfaceLayer(
         SurfaceRole.FAB -> theme.onAccent
         else -> theme.onSurface
     }
-    val layer = if (theme.style == SurfaceStyle.SOLID) {
+    val layer = if (role == SurfaceRole.TOP_BAR && theme.style == SurfaceStyle.SOLID) {
+        Modifier.background(base)
+    } else if (role == SurfaceRole.TOP_BAR) {
+        // No outline or rectangular haze edge: the header merges with the wallpaper below.
+        Modifier.background(
+            Brush.verticalGradient(
+                0f to base.copy(alpha = 0.94f),
+                0.34f to base.copy(alpha = 0.82f),
+                0.7f to base.copy(alpha = 0.42f),
+                0.9f to base.copy(alpha = 0.12f),
+                1f to Color.Transparent,
+            ),
+        )
+    } else if (theme.style == SurfaceStyle.SOLID) {
         Modifier
             .background(base)
             .border(0.7.dp, theme.outline.copy(alpha = 0.4f), shape)
     } else {
         val tint = if (role == SurfaceRole.FAB) theme.accent else base
+        val tintAlpha = if (role == SurfaceRole.FAB) 0.86f else theme.glass.tintAlpha
+        val fallbackAlpha = if (role == SurfaceRole.FAB) 0.96f else 0.88f
         val frosted = if (hazeState != null) {
             Modifier.hazeEffect(
                 hazeState,
                 style = HazeStyle(
                     backgroundColor = backdropColor ?: theme.background,
-                    tint = HazeTint(tint.copy(alpha = theme.glass.tintAlpha)),
+                    tint = HazeTint(tint.copy(alpha = tintAlpha)),
                     blurRadius = theme.glass.blurRadius,
-                    fallbackTint = HazeTint(tint.copy(alpha = 0.88f)),
+                    fallbackTint = HazeTint(tint.copy(alpha = fallbackAlpha)),
                 ),
             ) { blurEnabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S }
         } else {
             // Previews can render without a HazeState. Older devices use Haze's opaque scrim.
-            Modifier.background(tint.copy(alpha = 0.88f))
+            Modifier.background(tint.copy(alpha = fallbackAlpha))
         }
         frosted
             .drawWithContent {
                 drawContent()
                 drawRect(
                     brush = Brush.verticalGradient(
-                        listOf(theme.glass.highlight.copy(alpha = 0.13f), Color.Transparent),
+                        0f to theme.glass.highlight.copy(alpha = 0.16f),
+                        0.1f to theme.glass.highlight.copy(alpha = 0.1f),
+                        0.3f to theme.glass.highlight.copy(alpha = 0.045f),
+                        0.62f to theme.glass.highlight.copy(alpha = 0.008f),
+                        1f to Color.Transparent,
                     ),
-                    size = Size(size.width, size.height * 0.36f),
                 )
                 drawLine(
                     color = theme.glass.highlight.copy(alpha = 0.34f),
@@ -148,7 +166,17 @@ private fun SurfaceLayer(
                     strokeWidth = 1.dp.toPx(),
                 )
             }
-            .border(0.9.dp, Brush.verticalGradient(theme.glass.borderGradient), shape)
+            .border(
+                0.9.dp,
+                Brush.verticalGradient(
+                    0f to theme.glass.borderGradient[0],
+                    0.12f to theme.glass.borderGradient[1],
+                    0.42f to theme.glass.borderGradient[2],
+                    0.78f to theme.glass.borderGradient[3].copy(alpha = 0.06f),
+                    1f to Color.Transparent,
+                ),
+                shape,
+            )
     }
     CompositionLocalProvider(LocalContentColor provides contentColor) {
         Box(
@@ -200,7 +228,7 @@ fun AppTopBar(
     color: Color? = null,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     content: @Composable BoxScope.() -> Unit,
-) = SurfaceLayer(modifier, shape, color, contentPadding, SurfaceRole.DEFAULT, content = content)
+) = SurfaceLayer(modifier, shape, color, contentPadding, SurfaceRole.TOP_BAR, content = content)
 
 @Composable
 fun AppInputBar(

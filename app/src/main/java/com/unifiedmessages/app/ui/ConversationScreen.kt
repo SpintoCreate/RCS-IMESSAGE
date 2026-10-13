@@ -1,11 +1,15 @@
 package com.unifiedmessages.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -29,14 +33,19 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.unifiedmessages.app.model.ChatMessage
 import com.unifiedmessages.app.model.Conversation
@@ -71,90 +80,22 @@ fun ConversationScreen(
     } else {
         modifier
     }
-    Column(modifier = screenModifier) {
-        AppTopBar(
-            modifier = Modifier
-                .fillMaxWidth(),
-            color = palette.background,
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 9.dp),
-        ) {
-            if (showBack) {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier.align(Alignment.TopStart).size(48.dp),
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Outlined.ArrowBack,
-                        contentDescription = "Back to chats",
-                        tint = palette.onSurface,
-                    )
-                }
-            }
+    var topInsetPx by remember { mutableIntStateOf(0) }
+    var bottomInsetPx by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    val topInset = with(density) { topInsetPx.toDp() }
+    val bottomInset = with(density) { bottomInsetPx.toDp() }
 
-            Column(
-                modifier = Modifier.align(Alignment.Center).padding(horizontal = 48.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                ContactAvatar(text = conversation.avatarText, size = 42.dp)
-                Spacer(Modifier.height(5.dp))
-                Text(
-                    text = conversation.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = palette.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(4.dp))
-                SourceBadge(source = conversation.source.label)
-            }
-
-            IconButton(
-                onClick = {
-                    searchOpen = !searchOpen
-                    if (!searchOpen) onSearchQueryChange("")
-                },
-                modifier = Modifier.align(Alignment.TopEnd).size(48.dp),
-            ) {
-                Icon(
-                    if (searchOpen) Icons.Outlined.Close else Icons.Outlined.Search,
-                    contentDescription = if (searchOpen) "Close conversation search" else "Search messages",
-                    tint = palette.onSurface,
-                )
-            }
-        }
-
-        if (searchOpen) {
-            AppSurface(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
-                shape = RoundedCornerShape(18.dp),
-                color = palette.bubbleIncoming,
-            ) {
-                TextField(
-                    value = searchQuery,
-                    onValueChange = onSearchQueryChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Search messages") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(18.dp),
-                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        focusedTextColor = palette.onBubbleIncoming,
-                        unfocusedTextColor = palette.onBubbleIncoming,
-                        focusedPlaceholderColor = palette.onSurfaceVariant,
-                        unfocusedPlaceholderColor = palette.onSurfaceVariant,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        cursorColor = palette.accent,
-                    ),
-                )
-            }
-        }
-
+    Box(modifier = screenModifier) {
+        // The measured insets keep the resting layout unchanged while bubbles scroll behind the header.
         LazyColumn(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 20.dp),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 18.dp,
+                end = 18.dp,
+                top = topInset + 20.dp,
+                bottom = bottomInset + 20.dp,
+            ),
             verticalArrangement = Arrangement.Bottom,
         ) {
             item(key = "conversation-day-label") {
@@ -182,9 +123,97 @@ fun ConversationScreen(
             }
         }
 
+        Column(
+            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()
+                .onSizeChanged { topInsetPx = it.height }
+                .pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false) } },
+        ) {
+            AppTopBar(
+                modifier = Modifier
+                    .fillMaxWidth(),
+                color = palette.background,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 9.dp),
+            ) {
+                if (showBack) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.align(Alignment.TopStart).size(48.dp),
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Outlined.ArrowBack,
+                            contentDescription = "Back to chats",
+                            tint = palette.onSurface,
+                        )
+                    }
+                }
+
+                Column(
+                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 48.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    ContactAvatar(text = conversation.avatarText, size = 42.dp)
+                    Spacer(Modifier.height(5.dp))
+                    Text(
+                        text = conversation.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = palette.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    SourceBadge(source = conversation.source.label)
+                }
+
+                IconButton(
+                    onClick = {
+                        searchOpen = !searchOpen
+                        if (!searchOpen) onSearchQueryChange("")
+                    },
+                    modifier = Modifier.align(Alignment.TopEnd).size(48.dp),
+                ) {
+                    Icon(
+                        if (searchOpen) Icons.Outlined.Close else Icons.Outlined.Search,
+                        contentDescription = if (searchOpen) "Close conversation search" else "Search messages",
+                        tint = palette.onSurface,
+                    )
+                }
+            }
+
+            if (searchOpen) {
+                AppSurface(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    color = palette.bubbleIncoming,
+                ) {
+                    TextField(
+                        value = searchQuery,
+                        onValueChange = onSearchQueryChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Search messages") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(18.dp),
+                        leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            focusedTextColor = palette.onBubbleIncoming,
+                            unfocusedTextColor = palette.onBubbleIncoming,
+                            focusedPlaceholderColor = palette.onSurfaceVariant,
+                            unfocusedPlaceholderColor = palette.onSurfaceVariant,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            cursorColor = palette.accent,
+                        ),
+                    )
+                }
+            }
+        }
+
         AppInputBar(
             modifier = Modifier
-                .fillMaxWidth(),
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .onSizeChanged { bottomInsetPx = it.height },
             color = palette.background,
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 12.dp),
         ) {
