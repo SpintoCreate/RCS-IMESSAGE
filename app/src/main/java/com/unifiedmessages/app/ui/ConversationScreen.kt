@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -22,6 +21,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -39,11 +40,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.unifiedmessages.app.model.ChatMessage
 import com.unifiedmessages.app.model.Conversation
+import com.unifiedmessages.app.ui.components.ContactAvatar
 import com.unifiedmessages.app.ui.components.SourceBadge
 import com.unifiedmessages.app.ui.theme.LocalUnifiedPalette
 import com.unifiedmessages.app.ui.theme.VisualStyle
@@ -57,86 +61,167 @@ fun ConversationScreen(
 ) {
     val palette = LocalUnifiedPalette.current
     var draft by rememberSaveable(conversation.id) { mutableStateOf("") }
+    var searchOpen by rememberSaveable(conversation.id) { mutableStateOf(false) }
+    var searchQuery by rememberSaveable(conversation.id) { mutableStateOf("") }
+    val visibleMessages = if (searchQuery.isBlank()) conversation.messages else {
+        conversation.messages.filter { it.text.contains(searchQuery.trim(), ignoreCase = true) }
+    }
 
-    Column(modifier = modifier) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().padding(start = if (showBack) 5.dp else 22.dp, end = 20.dp, top = 13.dp, bottom = 14.dp),
+    Column(modifier = modifier.background(palette.background)) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(palette.background)
+                .padding(horizontal = 12.dp, vertical = 9.dp),
         ) {
             if (showBack) {
-                IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back to inbox", tint = palette.primaryText)
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier.align(Alignment.TopStart).size(48.dp),
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Outlined.ArrowBack,
+                        contentDescription = "Back to chats",
+                        tint = palette.primaryText,
+                    )
                 }
-                Spacer(Modifier.width(5.dp))
             }
-            Box(
-                Modifier.size(44.dp).background(palette.surfaceHighlight, CircleShape),
-                contentAlignment = Alignment.Center,
+
+            Column(
+                modifier = Modifier.align(Alignment.Center).padding(horizontal = 48.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(conversation.avatarText, color = palette.primaryText, style = MaterialTheme.typography.labelLarge)
+                ContactAvatar(text = conversation.avatarText, size = 42.dp)
+                Spacer(Modifier.height(5.dp))
+                Text(
+                    text = conversation.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = palette.primaryText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(4.dp))
+                SourceBadge(source = conversation.source.label)
             }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(conversation.title, color = palette.primaryText, style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(3.dp))
-                SourceBadge(conversation.source.label)
+
+            IconButton(
+                onClick = {
+                    searchOpen = !searchOpen
+                    if (!searchOpen) searchQuery = ""
+                },
+                modifier = Modifier.align(Alignment.TopEnd).size(48.dp),
+            ) {
+                Icon(
+                    if (searchOpen) Icons.Outlined.Close else Icons.Outlined.Search,
+                    contentDescription = if (searchOpen) "Close conversation search" else "Search sample messages",
+                    tint = palette.primaryText,
+                )
             }
         }
 
-        Box(Modifier.fillMaxWidth().height(1.dp).background(palette.outline.copy(alpha = 0.55f)))
+        if (searchOpen) {
+            TextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
+                placeholder = { Text("Search sample messages") },
+                singleLine = true,
+                shape = RoundedCornerShape(18.dp),
+                leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = palette.incomingBubble,
+                    unfocusedContainerColor = palette.incomingBubble,
+                    focusedTextColor = palette.onIncomingBubble,
+                    unfocusedTextColor = palette.onIncomingBubble,
+                    focusedPlaceholderColor = palette.secondaryText,
+                    unfocusedPlaceholderColor = palette.secondaryText,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    cursorColor = palette.accent,
+                ),
+            )
+        }
 
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.Bottom,
         ) {
-            item {
+            item(key = "sample-day-label") {
                 Text(
-                    text = "SAMPLE CONVERSATION · ${conversation.source.label.uppercase()}",
+                    text = "SAMPLE CONVERSATION",
                     color = palette.secondaryText,
                     style = MaterialTheme.typography.labelSmall,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 26.dp),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
                 )
             }
-            items(conversation.messages, key = { it.id }) { message ->
+            if (visibleMessages.isEmpty()) {
+                item(key = "no-results") {
+                    Text(
+                        text = "No sample messages match your search.",
+                        color = palette.secondaryText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 30.dp),
+                    )
+                }
+            }
+            items(visibleMessages, key = { it.id }) { message ->
                 MessageBubble(message)
             }
         }
 
         Column(
-            modifier = Modifier.fillMaxWidth().background(palette.surface.copy(alpha = 0.95f))
-                .padding(horizontal = 17.dp, vertical = 12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(palette.background)
+                .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 12.dp),
         ) {
             Text(
-                text = "PREVIEW MODE  ·  SENDING IS UNAVAILABLE",
+                text = "Preview only · messages cannot be sent",
                 style = MaterialTheme.typography.labelSmall,
-                color = palette.accent,
-                modifier = Modifier.padding(start = 8.dp, bottom = 8.dp),
+                color = palette.secondaryText,
+                modifier = Modifier.padding(start = 12.dp, bottom = 8.dp),
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextField(
                     value = draft,
                     onValueChange = { draft = it },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("Compose a draft") },
+                    placeholder = { Text("Write a draft") },
                     minLines = 1,
                     maxLines = 4,
-                    shape = RoundedCornerShape(24.dp),
+                    shape = RoundedCornerShape(28.dp),
                     colors = TextFieldDefaults.colors(
-                        focusedContainerColor = palette.surfaceElevated,
-                        unfocusedContainerColor = palette.surfaceElevated,
+                        focusedContainerColor = palette.incomingBubble,
+                        unfocusedContainerColor = palette.incomingBubble,
+                        focusedTextColor = palette.onIncomingBubble,
+                        unfocusedTextColor = palette.onIncomingBubble,
+                        focusedPlaceholderColor = palette.secondaryText,
+                        unfocusedPlaceholderColor = palette.secondaryText,
                         focusedIndicatorColor = Color.Transparent,
                         unfocusedIndicatorColor = Color.Transparent,
+                        cursorColor = palette.accent,
                     ),
                 )
-                Spacer(Modifier.width(7.dp))
-                IconButton(
-                    onClick = {},
-                    enabled = false,
-                    modifier = Modifier.size(48.dp).semantics { contentDescription = "Sending unavailable in preview" },
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .background(palette.accent.copy(alpha = 0.78f), CircleShape)
+                        .semantics {
+                            contentDescription = "Send unavailable in preview mode"
+                            disabled()
+                        },
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.AutoMirrored.Outlined.Send, contentDescription = null, tint = palette.secondaryText)
+                    Icon(
+                        Icons.AutoMirrored.Outlined.Send,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp),
+                    )
                 }
             }
         }
@@ -147,35 +232,36 @@ fun ConversationScreen(
 private fun MessageBubble(message: ChatMessage) {
     val palette = LocalUnifiedPalette.current
     val shape = RoundedCornerShape(
-        topStart = 21.dp,
-        topEnd = 21.dp,
-        bottomEnd = if (message.isMine) 6.dp else 21.dp,
-        bottomStart = if (message.isMine) 21.dp else 6.dp,
+        topStart = 16.dp,
+        topEnd = 16.dp,
+        bottomEnd = if (message.isMine) 5.dp else 16.dp,
+        bottomStart = if (message.isMine) 16.dp else 5.dp,
     )
     val base = if (message.isMine) palette.outgoingBubble else palette.incomingBubble
     val textColor = if (message.isMine) palette.onOutgoingBubble else palette.onIncomingBubble
-    val brush = if (palette.style == VisualStyle.LIQUID_GLASS) {
-        Brush.linearGradient(listOf(base.copy(alpha = 0.91f), palette.surfaceHighlight.copy(alpha = 0.93f)))
+    val isGlass = palette.style == VisualStyle.LIQUID_GLASS
+    val brush = if (isGlass) {
+        Brush.linearGradient(listOf(base.copy(alpha = 0.93f), palette.surfaceHighlight.copy(alpha = 0.93f)))
     } else {
         Brush.linearGradient(listOf(base, base))
     }
 
     Row(
         horizontalArrangement = if (message.isMine) Arrangement.End else Arrangement.Start,
-        modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
     ) {
         Column(horizontalAlignment = if (message.isMine) Alignment.End else Alignment.Start) {
             Box(
                 modifier = Modifier
                     .clip(shape)
                     .background(brush)
-                    .border(1.dp, if (palette.style == VisualStyle.LIQUID_GLASS) palette.outline.copy(alpha = 0.7f) else Color.Transparent, shape)
-                    .padding(horizontal = 15.dp, vertical = 12.dp),
+                    .border(1.dp, if (isGlass) palette.outline.copy(alpha = 0.6f) else Color.Transparent, shape)
+                    .padding(horizontal = 13.dp, vertical = 9.dp),
             ) {
                 Text(
                     text = message.text,
                     color = textColor,
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.widthIn(max = 300.dp),
                 )
             }
@@ -183,7 +269,7 @@ private fun MessageBubble(message: ChatMessage) {
                 text = message.time,
                 color = palette.secondaryText,
                 style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.padding(top = 5.dp, start = 3.dp, end = 3.dp),
+                modifier = Modifier.padding(top = 4.dp, start = 3.dp, end = 3.dp),
             )
         }
     }

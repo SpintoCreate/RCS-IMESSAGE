@@ -21,6 +21,7 @@ data class Conversation(
     val source: MessageSource,
     val timestamp: String,
     val unreadCount: Int,
+    val isPinned: Boolean = false,
     val messages: List<ChatMessage>,
 ) {
     val preview: String get() = messages.lastOrNull()?.text.orEmpty()

@@ -1,5 +1,6 @@
 package com.unifiedmessages.app.ui
 
+import android.app.Activity
 import android.content.Context
 import androidx.core.content.edit
 import androidx.activity.compose.BackHandler
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,7 +35,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 import com.unifiedmessages.app.data.SampleConversationRepository
 import com.unifiedmessages.app.ui.components.DotMatrixAccent
 import com.unifiedmessages.app.ui.theme.LocalUnifiedPalette
@@ -47,9 +51,13 @@ fun UnifiedMessagesApp() {
         context.getSharedPreferences("unified_messages_display", Context.MODE_PRIVATE)
     }
     var styleName by rememberSaveable {
-        mutableStateOf(preferences.getString("visual_style", VisualStyle.NOTHING.name) ?: VisualStyle.NOTHING.name)
+        // The new preference key opens the redesigned Chats look once after upgrading.
+        mutableStateOf(preferences.getString("visual_style_v2", VisualStyle.CHATS.name) ?: VisualStyle.CHATS.name)
     }
-    val style = VisualStyle.entries.firstOrNull { it.name == styleName } ?: VisualStyle.NOTHING
+    val style = VisualStyle.entries.firstOrNull { it.name == styleName } ?: VisualStyle.CHATS
+    var welcomeSeen by rememberSaveable {
+        mutableStateOf(preferences.getBoolean("welcome_seen_v2", false))
+    }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     val selected = selectedId?.let(SampleConversationRepository::findById)
@@ -60,6 +68,15 @@ fun UnifiedMessagesApp() {
 
     UnifiedMessagesTheme(style = style) {
         val palette = LocalUnifiedPalette.current
+        val view = LocalView.current
+        SideEffect {
+            (context as? Activity)?.let { activity ->
+                WindowCompat.getInsetsController(activity.window, view).apply {
+                    isAppearanceLightStatusBars = welcomeSeen && style == VisualStyle.CHATS
+                    isAppearanceLightNavigationBars = welcomeSeen && style == VisualStyle.CHATS
+                }
+            }
+        }
         val animatedBackground by animateColorAsState(palette.background, tween(450), label = "Background color")
         val glassGlow by animateFloatAsState(
             if (style == VisualStyle.LIQUID_GLASS) 1f else 0f,
@@ -69,10 +86,10 @@ fun UnifiedMessagesApp() {
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .background(animatedBackground)
+                .background(if (welcomeSeen) animatedBackground else Color(0xFF050810))
                 .windowInsetsPadding(WindowInsets.safeDrawing),
         ) {
-            if (glassGlow > 0f) {
+            if (welcomeSeen && glassGlow > 0f) {
                 Canvas(Modifier.fillMaxSize()) {
                     val radius = size.width.coerceAtLeast(1f) * 0.9f
                     drawCircle(
@@ -96,12 +113,20 @@ fun UnifiedMessagesApp() {
                 }
             }
             val expanded = maxWidth >= 840.dp
-            if (settingsOpen) {
+            if (!welcomeSeen) {
+                WelcomeScreen(
+                    onContinue = {
+                        welcomeSeen = true
+                        preferences.edit { putBoolean("welcome_seen_v2", true) }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else if (settingsOpen) {
                 SettingsScreen(
                     style = style,
                     onStyleSelected = { chosen ->
                         styleName = chosen.name
-                        preferences.edit { putString("visual_style", chosen.name) }
+                        preferences.edit { putString("visual_style_v2", chosen.name) }
                     },
                     onBack = { settingsOpen = false },
                     modifier = Modifier.fillMaxSize(),
@@ -166,15 +191,15 @@ private fun EmptyConversationHint() {
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(32.dp),
         ) {
-            DotMatrixAccent(columns = 8, rows = 4, dotSize = 3.dp, dotSpacing = 9.dp)
+            DotMatrixAccent(columns = 8, rows = 4, dotSize = 3.dp, dotSpacing = 9.dp, color = palette.accent)
             Text(
-                text = "SELECT A CONVERSATION",
+                text = "Select a chat",
                 style = MaterialTheme.typography.titleLarge,
                 color = palette.primaryText,
                 modifier = Modifier.padding(top = 28.dp),
             )
             Text(
-                text = "Sample conversations are shown here. Messaging is not connected.",
+                text = "Your sample conversation will appear here. Messaging is not connected.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = palette.secondaryText,
                 modifier = Modifier.padding(top = 10.dp),

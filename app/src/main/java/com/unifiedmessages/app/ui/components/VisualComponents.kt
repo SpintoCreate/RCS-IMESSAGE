@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -24,6 +25,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.unifiedmessages.app.ui.theme.LocalUnifiedPalette
@@ -38,34 +40,30 @@ fun StyleSurface(
     content: @Composable BoxScope.() -> Unit,
 ) {
     val palette = LocalUnifiedPalette.current
-    val background = if (palette.style == VisualStyle.LIQUID_GLASS) {
-        Brush.linearGradient(
+    val glass = palette.style == VisualStyle.LIQUID_GLASS
+    val surfaceModifier = if (glass) {
+        val background = Brush.linearGradient(
             listOf(
                 palette.surfaceHighlight.copy(alpha = 0.92f),
                 palette.surfaceElevated.copy(alpha = 0.86f),
                 palette.surface.copy(alpha = 0.92f),
             ),
         )
+        Modifier.background(background).border(1.dp, palette.outline.copy(alpha = 0.72f), shape)
     } else {
-        Brush.linearGradient(listOf(palette.surface, palette.surface))
-    }
-    val stroke = if (palette.style == VisualStyle.LIQUID_GLASS) {
-        palette.outline.copy(alpha = 0.72f)
-    } else {
-        palette.outline.copy(alpha = 0.55f)
+        Modifier.background(palette.surface)
     }
 
     Box(
         modifier = modifier
             .clip(shape)
-            .background(background)
-            .border(1.dp, stroke, shape)
+            .then(surfaceModifier)
             .padding(contentPadding),
         content = content,
     )
 }
 
-/** Compact transport label; color and spoken label both identify the source. */
+/** Compact transport label with readable text and an explicit spoken source. */
 @Composable
 fun SourceBadge(
     source: String,
@@ -84,19 +82,71 @@ fun SourceBadge(
         "SMS" -> palette.sms
         else -> palette.secondaryText
     }
+    val shape = RoundedCornerShape(8.dp)
+    val borderModifier = if (palette.style == VisualStyle.LIQUID_GLASS) {
+        Modifier.border(1.dp, tint.copy(alpha = 0.48f), shape)
+    } else {
+        Modifier
+    }
 
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(7.dp))
-            .background(tint.copy(alpha = 0.14f))
-            .border(1.dp, tint.copy(alpha = 0.48f), RoundedCornerShape(7.dp))
+            .clip(shape)
+            .background(tint.copy(alpha = if (palette.style == VisualStyle.CHATS) 0.1f else 0.16f))
+            .then(borderModifier)
             .semantics(mergeDescendants = true) { contentDescription = "Source: $label" }
-            .padding(horizontal = 7.dp, vertical = 3.dp),
+            .padding(horizontal = 8.dp, vertical = 4.dp),
     ) {
         Text(
             text = label,
             color = tint,
             style = MaterialTheme.typography.labelSmall,
+        )
+    }
+}
+
+private val avatarSwatches = listOf(
+    Color(0xFF142B68) to Color(0xFF536AAB),
+    Color(0xFF0B524D) to Color(0xFF3A746E),
+    Color(0xFF563164) to Color(0xFF80608C),
+    Color(0xFF7C391B) to Color(0xFFA15C39),
+    Color(0xFF30435E) to Color(0xFF5B718D),
+)
+
+/** Fictional initials on a stable abstract gradient; no contact photo permission is needed. */
+@Composable
+fun ContactAvatar(
+    text: String,
+    size: Dp = 48.dp,
+    modifier: Modifier = Modifier,
+) {
+    val initials = text.trim().uppercase().take(3).ifEmpty { "?" }
+    val (start, end) = avatarSwatches[Math.floorMod(initials.hashCode(), avatarSwatches.size)]
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(Brush.linearGradient(listOf(start, end)))
+            .clearAndSetSemantics { contentDescription = "Avatar with initials $initials" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .size(size * 0.63f)
+                .background(Color.White.copy(alpha = 0.12f), CircleShape),
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .size(size * 0.28f)
+                .background(Color.Black.copy(alpha = 0.08f), CircleShape),
+        )
+        Text(
+            text = initials,
+            color = Color.White,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
         )
     }
 }

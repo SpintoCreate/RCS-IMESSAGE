@@ -63,14 +63,14 @@ fun SettingsScreen(
 
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             AppearanceOption(
-                title = "Nothing",
-                description = "Deep black, crisp typography, and subtle red details.",
-                selected = style == VisualStyle.NOTHING,
-                onClick = { onStyleSelected(VisualStyle.NOTHING) },
+                title = "Chats · Default",
+                description = "A calm light canvas, white cards, and electric-blue details.",
+                selected = style == VisualStyle.CHATS,
+                onClick = { onStyleSelected(VisualStyle.CHATS) },
             )
             AppearanceOption(
                 title = "Liquid Glass",
-                description = "Translucent layers, soft highlights, and luminous edges.",
+                description = "A darker look with translucent layers and soft blue highlights.",
                 selected = style == VisualStyle.LIQUID_GLASS,
                 onClick = { onStyleSelected(VisualStyle.LIQUID_GLASS) },
             )
@@ -90,7 +90,7 @@ fun SettingsScreen(
             Column {
                 Text("UnifiedMessages", style = MaterialTheme.typography.titleMedium, color = palette.primaryText)
                 Text(
-                    "Version 0.1 · interface preview",
+                    "Version 0.2 · interface preview",
                     style = MaterialTheme.typography.labelMedium,
                     color = palette.secondaryText,
                     modifier = Modifier.padding(top = 6.dp),

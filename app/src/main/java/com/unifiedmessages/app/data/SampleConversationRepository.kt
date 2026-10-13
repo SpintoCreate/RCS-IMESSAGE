@@ -14,6 +14,7 @@ object SampleConversationRepository {
             source = MessageSource.IMESSAGE,
             timestamp = "9:41 AM",
             unreadCount = 2,
+            isPinned = true,
             messages = listOf(
                 ChatMessage("a1", "Are we still on for the concert?", "9:30 AM", false),
                 ChatMessage("a2", "Absolutely. I'll meet you at the entrance.", "9:34 AM", true),
@@ -27,6 +28,7 @@ object SampleConversationRepository {
             source = MessageSource.RCS,
             timestamp = "8:22 AM",
             unreadCount = 1,
+            isPinned = true,
             messages = listOf(
                 ChatMessage("m1", "Those photos turned out so well.", "8:18 AM", true),
                 ChatMessage("m2", "I'll send the rest this evening.", "8:22 AM", false),
