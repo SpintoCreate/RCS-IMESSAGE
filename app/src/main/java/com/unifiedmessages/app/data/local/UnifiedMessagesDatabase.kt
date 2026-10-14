@@ -20,6 +20,8 @@ data class ThreadSummary(
     val lastContentType: ContentType?,
     val lastSubject: String?,
     val unreadCount: Int,
+    /** Newest nondeleted body containing the active inbox search text, if any. */
+    val matchingBody: String?,
 )
 
 @Dao
@@ -32,6 +34,13 @@ interface ThreadDao {
 
     @Query(
         """
+        WITH search_participants AS (
+            SELECT p.threadId, p.address, p.displayName, p.isSelf,
+                REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+                    p.address, '+', ''), ' ', ''), '-', ''), '(', ''), ')', ''), '.', '')
+                    AS numberDigits
+            FROM participants p
+        )
         SELECT t.*,
             CASE WHEN latest.isDeleted = 1 THEN NULL ELSE latest.body END AS lastBody,
             latest.timestamp AS lastTimestamp,
@@ -40,7 +49,10 @@ interface ThreadDao {
             latest.contentType AS lastContentType,
             CASE WHEN latest.isDeleted = 1 THEN NULL ELSE latest.subject END AS lastSubject,
             (SELECT COUNT(*) FROM messages m WHERE m.threadId = t.id
-                AND m.direction = 'INCOMING' AND m.isRead = 0 AND m.isDeleted = 0) AS unreadCount
+                AND m.direction = 'INCOMING' AND m.isRead = 0 AND m.isDeleted = 0) AS unreadCount,
+            (SELECT m.body FROM messages m WHERE m.threadId = t.id AND m.isDeleted = 0
+                AND :query != '' AND INSTR(LOWER(COALESCE(m.body, '')), LOWER(:query)) > 0
+                ORDER BY m.timestamp DESC, m.id DESC LIMIT 1) AS matchingBody
         FROM threads t
         LEFT JOIN messages latest ON latest.id = (
             SELECT m.id FROM messages m WHERE m.threadId = t.id
@@ -49,13 +61,25 @@ interface ThreadDao {
         )
         WHERE (:source IS NULL OR UPPER(t.source) = :source
             OR (:source = 'SMS' AND UPPER(t.source) = 'MMS'))
-          AND (:query = '' OR LOWER(t.title) LIKE '%' || LOWER(:query) || '%'
-              OR LOWER(t.source) LIKE '%' || LOWER(:query) || '%'
-              OR EXISTS (SELECT 1 FROM participants p WHERE p.threadId = t.id
-                  AND (LOWER(p.address) LIKE '%' || LOWER(:query) || '%'
-                       OR LOWER(COALESCE(p.displayName, '')) LIKE '%' || LOWER(:query) || '%'))
+          AND (:query = '' OR INSTR(LOWER(t.title), LOWER(:query)) > 0
+              OR INSTR(LOWER(t.source), LOWER(:query)) > 0
+              OR EXISTS (SELECT 1 FROM search_participants p WHERE p.threadId = t.id AND p.isSelf = 0
+                  AND (INSTR(LOWER(p.address), LOWER(:query)) > 0
+                       OR INSTR(LOWER(COALESCE(p.displayName, '')), LOWER(:query)) > 0
+                       OR (:digits != '' AND (INSTR(p.numberDigits, :digits) > 0
+                           OR (:digitsWithoutUsPrefix != ''
+                               AND INSTR(p.numberDigits, :digitsWithoutUsPrefix) > 0)))))
+              OR EXISTS (SELECT 1 FROM search_participants p
+                  JOIN cached_contacts c ON p.isSelf = 0 AND (
+                      c.numberDigits = p.numberDigits
+                      OR (LENGTH(c.numberDigits) = 11 AND SUBSTR(c.numberDigits, 1, 1) = '1'
+                          AND SUBSTR(c.numberDigits, 2) = p.numberDigits)
+                      OR (LENGTH(p.numberDigits) = 11 AND SUBSTR(p.numberDigits, 1, 1) = '1'
+                          AND SUBSTR(p.numberDigits, 2) = c.numberDigits))
+                  WHERE p.threadId = t.id
+                      AND INSTR(LOWER(c.displayName), LOWER(:query)) > 0)
               OR EXISTS (SELECT 1 FROM messages m WHERE m.threadId = t.id AND m.isDeleted = 0
-                  AND LOWER(COALESCE(m.body, '')) LIKE '%' || LOWER(:query) || '%'))
+                  AND INSTR(LOWER(COALESCE(m.body, '')), LOWER(:query)) > 0))
         ORDER BY t.isPinned DESC, COALESCE(lastTimestamp, t.updatedAt) DESC, t.id ASC
         """,
     )
@@ -63,6 +87,8 @@ interface ThreadDao {
         query: String = "",
         source: String? = null,
         showSenderDeleted: Boolean = true,
+        digits: String = "",
+        digitsWithoutUsPrefix: String = "",
     ): Flow<List<ThreadSummary>>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)

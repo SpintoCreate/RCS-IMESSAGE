@@ -21,6 +21,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
@@ -37,6 +39,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -51,8 +54,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.unifiedmessages.app.model.Conversation
@@ -83,9 +94,20 @@ fun InboxScreen(
     onRequestSmsAccess: () -> Unit = {},
     onSettings: () -> Unit,
     selectedId: String?,
+    isSearching: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val theme = LocalAppTheme.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focus = LocalFocusManager.current
+    var searchField by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(query, TextRange(query.length)))
+    }
+    // Restore a saved field after process recreation without resetting its cursor during typing.
+    LaunchedEffect(Unit) {
+        if (searchField.text != query) onQueryChange(searchField.text)
+    }
+    val searchText = searchField.text.trim()
     var settingsMenuOpen by rememberSaveable { mutableStateOf(false) }
     var sourceMenuOpen by rememberSaveable { mutableStateOf(false) }
     val pinned = conversations.filter { it.isPinned }
@@ -101,13 +123,18 @@ fun InboxScreen(
     val controlsHeight = with(LocalDensity.current) { controlsHeightPx.toDp() }
 
     Box(modifier = modifier) {
-        if (conversations.isEmpty()) {
+        if (isSearching || conversations.isEmpty()) {
             Box(
                 Modifier.fillMaxSize().padding(top = controlsHeight),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = if (query.isNotBlank() || source != null) "No chats match your search." else "No messages yet.",
+                    text = when {
+                        isSearching -> if (searchText.isNotEmpty()) "Searching…" else "Loading chats…"
+                        searchText.isNotEmpty() -> "No results for “$searchText”"
+                        source != null -> "No chats for this source."
+                        else -> "No messages yet."
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = theme.onSurfaceVariant,
                 )
@@ -118,16 +145,22 @@ fun InboxScreen(
                 state = listState,
                 contentPadding = PaddingValues(top = controlsHeight, bottom = 94.dp),
             ) {
-                if (pinned.isNotEmpty()) {
+                if (searchText.isNotEmpty()) {
                     item {
-                        SectionLabel("Pinned")
-                        ConversationGroup(pinned, selectedId, onConversationSelected, onPinToggle)
+                        ConversationGroup(conversations, selectedId, onConversationSelected, onPinToggle, searchText)
                     }
-                }
-                if (other.isNotEmpty()) {
-                    item {
-                        SectionLabel("All")
-                        ConversationGroup(other, selectedId, onConversationSelected, onPinToggle)
+                } else {
+                    if (pinned.isNotEmpty()) {
+                        item {
+                            SectionLabel("Pinned")
+                            ConversationGroup(pinned, selectedId, onConversationSelected, onPinToggle)
+                        }
+                    }
+                    if (other.isNotEmpty()) {
+                        item {
+                            SectionLabel("All")
+                            ConversationGroup(other, selectedId, onConversationSelected, onPinToggle)
+                        }
                     }
                 }
             }
@@ -190,14 +223,25 @@ fun InboxScreen(
                     color = theme.surface,
                 ) {
                     TextField(
-                        value = query,
-                        onValueChange = onQueryChange,
+                        value = searchField,
+                        onValueChange = { updated ->
+                            searchField = updated
+                            onQueryChange(updated.text)
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = { Text("Search chats") },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = {
+                            keyboard?.hide()
+                            focus.clearFocus()
+                        }),
                         leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
                         trailingIcon = {
-                            if (query.isNotEmpty()) {
-                                IconButton(onClick = { onQueryChange("") }) {
+                            if (searchField.text.isNotEmpty()) {
+                                IconButton(onClick = {
+                                    searchField = TextFieldValue("")
+                                    onQueryChange("")
+                                }) {
                                     Icon(Icons.Outlined.Close, contentDescription = "Clear search")
                                 }
                             }
@@ -307,6 +351,7 @@ private fun ConversationGroup(
     selectedId: String?,
     onConversationSelected: (String) -> Unit,
     onPinToggle: (String, Boolean) -> Unit,
+    searchQuery: String = "",
 ) {
     val theme = LocalAppTheme.current
     AppCard(
@@ -322,6 +367,7 @@ private fun ConversationGroup(
                     selected = conversation.id == selectedId,
                     onClick = { onConversationSelected(conversation.id) },
                     onPinToggle = { onPinToggle(conversation.id, !conversation.isPinned) },
+                    searchQuery = searchQuery,
                 )
                 if (index < conversations.lastIndex) {
                     HorizontalDivider(
@@ -341,6 +387,7 @@ private fun ConversationRow(
     selected: Boolean,
     onClick: () -> Unit,
     onPinToggle: () -> Unit,
+    searchQuery: String,
 ) {
     val theme = LocalAppTheme.current
     Row(
@@ -361,7 +408,7 @@ private fun ConversationRow(
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = conversation.title,
+                    text = highlightedMatch(conversation.title, searchQuery, theme.accent, theme.onSurface),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = if (conversation.unreadCount > 0) FontWeight.SemiBold else FontWeight.Medium,
                     color = theme.onSurface,
@@ -384,7 +431,7 @@ private fun ConversationRow(
                     Spacer(Modifier.width(6.dp))
                 }
                 Text(
-                    text = conversation.preview,
+                    text = highlightedMatch(conversation.preview, searchQuery, theme.accent, theme.onSurface),
                     style = MaterialTheme.typography.bodySmall,
                     color = theme.onSurfaceVariant,
                     maxLines = 1,
@@ -404,6 +451,37 @@ private fun ConversationRow(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+/** Emphasize the matching portion of a Room snippet without changing row dimensions. */
+private fun highlightedMatch(text: String, query: String, accent: Color, onSurface: Color): AnnotatedString {
+    val trimmed = query.trim()
+    if (trimmed.isEmpty()) return AnnotatedString(text)
+    val style = SpanStyle(
+        color = onSurface,
+        background = accent.copy(alpha = 0.18f),
+        fontWeight = FontWeight.Bold,
+    )
+    return buildAnnotatedString {
+        append(text)
+        var start = text.indexOf(trimmed, ignoreCase = true)
+        while (start >= 0) {
+            addStyle(style, start, start + trimmed.length)
+            start = text.indexOf(trimmed, startIndex = start + trimmed.length, ignoreCase = true)
+        }
+        // A digit-only query can match formatted numbers with separators in between.
+        if (text.indexOf(trimmed, ignoreCase = true) < 0 && trimmed.any(Char::isDigit) &&
+            trimmed.all { it.isDigit() || it == '+' || it == ' ' || it == '-' || it == '(' || it == ')' }
+        ) {
+            val needle = trimmed.filter(Char::isDigit)
+            val digitPositions = text.indices.filter { text[it].isDigit() }
+            val digits = digitPositions.joinToString("") { text[it].toString() }
+            val digitStart = digits.indexOf(needle)
+            if (needle.isNotEmpty() && digitStart >= 0) {
+                addStyle(style, digitPositions[digitStart], digitPositions[digitStart + needle.length - 1] + 1)
             }
         }
     }

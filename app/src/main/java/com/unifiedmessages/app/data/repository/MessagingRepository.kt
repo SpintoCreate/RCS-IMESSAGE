@@ -43,10 +43,18 @@ class MessagingRepository @Inject constructor(
     private val deviceRegion = PhoneNumbers.deviceRegion(context)
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    fun observeInbox(query: String, source: MessageSource?): Flow<List<Conversation>> =
-        deletedMessagePreferences.showSenderDeletedMessages.flatMapLatest { showSenderDeleted ->
+    fun observeInbox(query: String, source: MessageSource?): Flow<List<Conversation>> {
+        val search = query.trim()
+        val numberTerms = SearchMatching.numberTerms(search)
+        return deletedMessagePreferences.showSenderDeletedMessages.flatMapLatest { showSenderDeleted ->
             combine(
-                database.threadDao().observeThreads(query.trim(), source?.name, showSenderDeleted),
+                database.threadDao().observeThreads(
+                    query = search,
+                    source = source?.name,
+                    showSenderDeleted = showSenderDeleted,
+                    digits = numberTerms.digits,
+                    digitsWithoutUsPrefix = numberTerms.digitsWithoutUsPrefix,
+                ),
                 database.threadDao().observeRemoteParticipants(),
                 contactsRepository.contacts,
             ) { rows, participants, contacts ->
@@ -56,10 +64,12 @@ class MessagingRepository @Inject constructor(
                     row.toInboxConversation(
                         showSenderDeleted,
                         recipientsByThread[row.thread.id].orEmpty().map { it.address },
+                        search,
                     ).withContacts(contactsByNumber)
                 }
             }
         }
+    }
 
     fun observeConversation(threadId: String, query: String = ""): Flow<Conversation?> =
         combine(
@@ -121,6 +131,7 @@ class MessagingRepository @Inject constructor(
     private fun ThreadSummary.toInboxConversation(
         showSenderDeleted: Boolean,
         recipients: List<String>,
+        search: String,
     ): Conversation =
         Conversation(
             id = thread.id,
@@ -132,7 +143,7 @@ class MessagingRepository @Inject constructor(
             isPinned = thread.isPinned,
             messages = emptyList(),
             recipients = recipients,
-            previewText = if (lastIsDeleted) {
+            previewText = matchingBody?.let { SearchMatching.messageSnippet(it, search) } ?: if (lastIsDeleted) {
                 if (lastDeletedBySender && showSenderDeleted) "Deleted by sender" else ""
             } else {
                 displayBody(lastBody, lastContentType, lastSubject)

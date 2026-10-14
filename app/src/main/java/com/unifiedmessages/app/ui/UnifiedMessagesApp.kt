@@ -374,6 +374,7 @@ fun UnifiedMessagesApp(
                             InboxScreen(
                                 conversations = inboxState.conversations,
                                 query = inboxState.query,
+                                isSearching = inboxState.isSearching,
                                 onQueryChange = inboxViewModel::setQuery,
                                 source = inboxState.source,
                                 onSourceChange = inboxViewModel::setSource,
@@ -434,6 +435,7 @@ fun UnifiedMessagesApp(
                                 InboxScreen(
                                     conversations = inboxState.conversations,
                                     query = inboxState.query,
+                                    isSearching = inboxState.isSearching,
                                     onQueryChange = inboxViewModel::setQuery,
                                     source = inboxState.source,
                                     onSourceChange = inboxViewModel::setSource,
