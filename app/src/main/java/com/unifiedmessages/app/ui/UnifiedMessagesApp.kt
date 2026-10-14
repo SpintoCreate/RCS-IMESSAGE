@@ -189,8 +189,8 @@ fun UnifiedMessagesApp(
             onRecipientHandled()
         }
     }
-    LaunchedEffect(newMessageOpen, hasContactsPermission) {
-        if (newMessageOpen && !hasContactsPermission &&
+    LaunchedEffect(newMessageOpen, hasContactsPermission, smsState.ready) {
+        if (newMessageOpen && smsState.ready && !hasContactsPermission &&
             !preferences.getBoolean("contacts_permission_requested_v1", false)
         ) {
             preferences.edit { putBoolean("contacts_permission_requested_v1", true) }

@@ -1,5 +1,8 @@
 package com.unifiedmessages.app.data.repository
 
+import com.unifiedmessages.app.data.local.ParticipantEntity
+import com.unifiedmessages.app.sms.PhoneNumbers
+
 /** Terms passed to the Room inbox query, which compares numbers after removing punctuation. */
 internal data class SearchNumberTerms(
     val digits: String,
@@ -7,6 +10,28 @@ internal data class SearchNumberTerms(
 )
 
 internal object SearchMatching {
+    /** Resolve cached names through E.164, including national-format participants outside the US. */
+    fun matchingContactThreadIds(
+        query: String,
+        region: String,
+        participants: List<ParticipantEntity>,
+        contacts: List<CachedContact>,
+    ): List<String> {
+        val search = query.trim()
+        if (search.isEmpty()) return emptyList()
+        val matchingNumbers = contacts.asSequence()
+            .filter { it.displayName.contains(search, ignoreCase = true) }
+            .map { it.normalizedNumber }
+            .toSet()
+        if (matchingNumbers.isEmpty()) return emptyList()
+        return participants.asSequence()
+            .filterNot { it.isSelf }
+            .filter { PhoneNumbers.normalizeToE164(it.address, region) in matchingNumbers }
+            .map { it.threadId }
+            .distinct()
+            .toList()
+    }
+
     fun numberTerms(query: String): SearchNumberTerms {
         val trimmed = query.trim()
         if (trimmed.any(Char::isLetter)) return SearchNumberTerms("", "")

@@ -69,6 +69,11 @@ class SmsProvider @Inject constructor(
     suspend fun startThread(recipients: List<String>, region: String): String = withContext(Dispatchers.IO) {
         check(isReady()) { "SMS access is not ready." }
         val dao = database.threadDao()
+        val normalized = ThreadRecipients.requireNormalized(recipients, region)
+        // Android's canonical recipient set is authoritative. An imported group MMS may have
+        // only its sender in Room when the SIM's own number could not be identified.
+        val systemThreadId = Telephony.Threads.getOrCreateThreadId(context, normalized).toString()
+        val threadId = ProviderIds.thread(id, systemThreadId)
         val candidates = dao.observeThreads(source = "SMS").first()
             .filter { it.thread.providerId == id }
             .map { summary ->
@@ -77,14 +82,9 @@ class SmsProvider @Inject constructor(
                     dao.getParticipants(summary.thread.id).map { it.address },
                 )
             }
-        val resolution = ThreadRecipients.resolve(recipients, region, candidates)
-        resolution.existingThreadId?.let { return@withContext it }
-
-        val systemThreadId = Telephony.Threads.getOrCreateThreadId(
-            context, resolution.normalizedRecipients,
-        ).toString()
-        val threadId = ProviderIds.thread(id, systemThreadId)
-        val ordered = resolution.normalizedRecipients.sorted()
+        val resolution = ThreadRecipients.resolve(normalized, region, candidates)
+        if (resolution.existingThreadId == threadId) return@withContext threadId
+        val ordered = normalized.sorted()
         if (dao.getThread(threadId) == null) {
             dao.insert(
                 ThreadEntity(
@@ -118,7 +118,10 @@ class SmsProvider @Inject constructor(
 
     suspend fun sendThreadText(threadId: String, text: String) {
         database.threadDao().getThread(threadId) ?: error("Conversation no longer exists.")
-        val recipients = database.threadDao().getParticipants(threadId)
+        val recipients = ThreadRecipients.requireSendableExisting(
+            database.threadDao().getParticipants(threadId).map { it.address },
+            PhoneNumbers.deviceRegion(context),
+        )
         if (recipients.size > 1) {
             sendMms(threadId, text, emptyList())
         } else {

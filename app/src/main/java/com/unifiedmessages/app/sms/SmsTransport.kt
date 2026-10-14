@@ -48,8 +48,9 @@ class SmsTransport @Inject constructor(
         val recipients = database.threadDao().getParticipants(threadId)
             .filterNot { it.isSelf }
             .map { it.address }
-            .distinct()
+            .let { ThreadRecipients.requireSendableExisting(it, PhoneNumbers.deviceRegion(context)) }
         require(recipients.size == 1) { "Group conversations require MMS" }
+        CarrierThreadVerifier.requireSafeRecipients(context, database, thread, recipients)
         sendToAddress(
             recipients.single(),
             text,

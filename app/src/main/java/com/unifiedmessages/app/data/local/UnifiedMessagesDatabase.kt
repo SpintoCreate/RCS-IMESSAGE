@@ -69,15 +69,7 @@ interface ThreadDao {
                        OR (:digits != '' AND (INSTR(p.numberDigits, :digits) > 0
                            OR (:digitsWithoutUsPrefix != ''
                                AND INSTR(p.numberDigits, :digitsWithoutUsPrefix) > 0)))))
-              OR EXISTS (SELECT 1 FROM search_participants p
-                  JOIN cached_contacts c ON p.isSelf = 0 AND (
-                      c.numberDigits = p.numberDigits
-                      OR (LENGTH(c.numberDigits) = 11 AND SUBSTR(c.numberDigits, 1, 1) = '1'
-                          AND SUBSTR(c.numberDigits, 2) = p.numberDigits)
-                      OR (LENGTH(p.numberDigits) = 11 AND SUBSTR(p.numberDigits, 1, 1) = '1'
-                          AND SUBSTR(p.numberDigits, 2) = c.numberDigits))
-                  WHERE p.threadId = t.id
-                      AND INSTR(LOWER(c.displayName), LOWER(:query)) > 0)
+              OR t.id IN (:matchingContactThreadIds)
               OR EXISTS (SELECT 1 FROM messages m WHERE m.threadId = t.id AND m.isDeleted = 0
                   AND INSTR(LOWER(COALESCE(m.body, '')), LOWER(:query)) > 0))
         ORDER BY t.isPinned DESC, COALESCE(lastTimestamp, t.updatedAt) DESC, t.id ASC
@@ -89,6 +81,7 @@ interface ThreadDao {
         showSenderDeleted: Boolean = true,
         digits: String = "",
         digitsWithoutUsPrefix: String = "",
+        matchingContactThreadIds: List<String> = emptyList(),
     ): Flow<List<ThreadSummary>>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)

@@ -19,7 +19,7 @@ UnifiedMessages is a free, native Android messaging app built with Kotlin, Jetpa
 4. Connect the unlocked phone with a data-capable USB cable. Accept its USB debugging prompt. Select the phone and the **app** run configuration in Android Studio, then click the green **Run** triangle. Android Studio builds, installs, and opens the app.
 5. On the welcome screen, tap **Get started**. Android asks whether to make UnifiedMessages the **default SMS app**. Choose UnifiedMessages, then grant the SMS/MMS permissions it requests. The app imports existing SMS and MMS threads from Android's message store; a large history may take a moment to appear.
 
-If you decline the role or permissions, you can still open the app, but sending and importing SMS/MMS require both. Tap the **+** button to try the setup prompts again. If Android Studio does not show your phone, reconnect and unlock it, accept the debugging prompt, and check **Device Manager**; a charge-only cable will not deploy an app.
+If you decline the role or permissions, you can still open the app, but sending and importing SMS/MMS require both. Use the banner in Chats, a conversation, or New Message to request access again. The app asks for optional Contacts access when you first compose a new message; you can still type numbers if you decline it. If Android Studio does not show your phone, reconnect and unlock it, accept the debugging prompt, and check **Device Manager**; a charge-only cable will not deploy an app.
 
 ### Get the APK
 
@@ -27,9 +27,9 @@ In Android Studio choose **Build → Build Bundle(s) / APK(s) → Build APK(s)**
 
 ## Use the app
 
-- Tap **+**, enter a phone number, and tap **Continue** to open a thread. Type a message and tap Send. One-to-one text goes by SMS; text in a group thread goes by MMS. The conversation shows pending, sent, delivered, or failed status when Android and the carrier provide it. A delivery receipt is not guaranteed by every carrier. If Android cannot identify this phone's number in an incoming group MMS, the app retains the sender as the safe reply recipient and does not guess the other recipients.
-- To send a photo, video, or audio file by MMS, open it in a Gallery or Files app, tap **Share**, choose **UnifiedMessages**, enter a phone number, and tap **Send**. You can share multiple supported media items together. To open a received attachment, tap its message bubble and choose the attachment. The app does not yet provide an in-app media picker or full media viewer. Carrier size limits apply.
-- Search the inbox by contact, number, message text, or source. The **All sources** menu filters SMS/MMS, RCS, and iMessage rows already stored locally; there is no live RCS or iMessage connection. Long-press a chat to pin or unpin it. Unread counts update as messages are opened.
+- Tap **+** to open New Message. In **To:**, type a number and tap its **Send to** suggestion or press Done to add a recipient chip; you can also choose a contact. Add more chips for a group, type your message, then tap Send. The app finds the thread with exactly those recipients or creates one and opens it. One-to-one text goes by SMS; group text and messages with attachments go by MMS. The conversation shows sending, sent, delivered, or failed status when Android and the carrier provide it; failed outgoing messages have **Retry**. A delivery receipt is not guaranteed by every carrier. If an imported MMS group has an incomplete recipient list, sending is blocked with an explanation so no member is guessed; start a New Message and add every recipient.
+- To send a photo, video, or audio file by MMS, tap the paperclip in New Message or a conversation and choose files. You can also share supported media from Gallery or Files to UnifiedMessages. To open a received attachment, tap its message bubble and choose the attachment. Carrier size limits apply.
+- Search the inbox by contact name, phone number, or message text. Matching message text appears in the preview. The source menu currently offers **All sources** and **SMS**; it does not activate RCS or iMessage. Long-press a chat to pin or unpin it. Unread counts update as messages are opened.
 - Open the top-right menu and choose **Settings**. Appearance changes apply immediately. Under **Message display**, turn **Show sender deletions** on to retain a visible “Deleted by sender” marker, or off to hide that message from the conversation. The underlying database retains deletion and edit history.
 - Some incoming SMS messages such as `Liked 'hello'` are recognized as text fallback reactions and stored as reactions on the matching message. SMS itself does not support native reaction, edit, unsend, read receipt, or app-message actions, so those controls are unavailable.
 
@@ -42,7 +42,7 @@ Choose **Solid** or **Liquid Glass** surfaces, **Light**, **Dark**, or **System*
 ## Project structure
 
 - `app/src/main/java/com/unifiedmessages/app/data/local/` — Room entities, queries, and the event reducer.
-- `app/src/main/java/com/unifiedmessages/app/data/repository/` — inbox and conversation projections plus the deleted-message setting.
+- `app/src/main/java/com/unifiedmessages/app/data/repository/` — inbox, conversation, and contact projections plus the deleted-message setting.
 - `app/src/main/java/com/unifiedmessages/app/provider/` — provider events, capabilities, and inactive future-provider stubs.
 - `app/src/main/java/com/unifiedmessages/app/sms/` — default-SMS role integration, system message import, SMS transport, and MMS transport under `mms/`.
 - `app/src/main/java/com/unifiedmessages/app/ui/` — Compose screens and Hilt ViewModels.
@@ -57,4 +57,4 @@ With Android SDK Platform 36 and JDK 17 or newer installed, run in this folder:
 ./gradlew :app:assembleDebug :app:assembleRelease :app:testDebugUnitTest :app:lintDebug
 ```
 
-On Windows use `gradlew.bat` instead of `./gradlew`. The reducer, reaction parser, and appearance have unit tests. Build and unit-test checks can run without a SIM. SMS/MMS sending, reception, carrier delivery receipts, and MMS download still need a physical-device test with an active SIM and carrier; they have not been verified on a physical phone in this workspace.
+On Windows use `gradlew.bat` instead of `./gradlew`. The reducer, reaction parser, phone normalization, thread matching, search, and appearance have unit tests. Build and unit-test checks can run without a SIM. SMS/MMS sending, reception, carrier delivery receipts, and MMS download still need a physical-device test with an active SIM and carrier; they have not been verified on a physical phone in this workspace.

@@ -1,6 +1,7 @@
 package com.unifiedmessages.app.sms
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -38,5 +39,29 @@ class ThreadRecipientsTest {
         )
         assertNull(resolution.existingThreadId)
         assertEquals(setOf("+15551234567"), resolution.normalizedRecipients)
+    }
+
+    @Test fun duplicateNumberFormatsRouteAsOneSmsRecipient() {
+        val recipients = ThreadRecipients.requireSendableExisting(
+            listOf("(555) 123-4567", "+1 555 123 4567"), "US",
+        )
+        assertEquals(setOf("+15551234567"), recipients)
+        assertThrows(IllegalArgumentException::class.java) {
+            ThreadRecipients.requireSendableExisting(listOf("+15551234567", "12345"), "US")
+        }
+    }
+
+    @Test fun platformMismatchNeverReusesAnIncompleteGroup() {
+        assertEquals(false, ThreadRecipients.canUseExistingThread("7", "7", 1, true, 2))
+        assertEquals(false, ThreadRecipients.canUseExistingThread("7", "8", 1, true, 2))
+        assertEquals(false, ThreadRecipients.canUseExistingThread("7", "8", 1, true, null))
+        assertEquals(false, ThreadRecipients.canUseExistingThread("7", "8", 2, false, 2))
+    }
+
+    @Test fun legacySingletonSmsCanUseItsOriginalThread() {
+        assertTrue(ThreadRecipients.canUseExistingThread("7", "8", 1, false, null))
+        assertEquals(false, ThreadRecipients.canUseExistingThread("7", "8", 1, true, 1))
+        assertEquals(false, ThreadRecipients.canUseExistingThread("7", "7", 2, true, 1))
+        assertTrue(ThreadRecipients.canUseExistingThread("7", "7", 2, true, 2))
     }
 }

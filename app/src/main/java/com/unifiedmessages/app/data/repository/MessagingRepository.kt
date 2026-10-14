@@ -29,6 +29,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -46,18 +47,24 @@ class MessagingRepository @Inject constructor(
     fun observeInbox(query: String, source: MessageSource?): Flow<List<Conversation>> {
         val search = query.trim()
         val numberTerms = SearchMatching.numberTerms(search)
-        return deletedMessagePreferences.showSenderDeletedMessages.flatMapLatest { showSenderDeleted ->
-            combine(
-                database.threadDao().observeThreads(
-                    query = search,
-                    source = source?.name,
-                    showSenderDeleted = showSenderDeleted,
-                    digits = numberTerms.digits,
-                    digitsWithoutUsPrefix = numberTerms.digitsWithoutUsPrefix,
-                ),
-                database.threadDao().observeRemoteParticipants(),
-                contactsRepository.contacts,
-            ) { rows, participants, contacts ->
+        return combine(
+            deletedMessagePreferences.showSenderDeletedMessages,
+            database.threadDao().observeRemoteParticipants(),
+            contactsRepository.contacts,
+        ) { showSenderDeleted, participants, contacts ->
+            Triple(showSenderDeleted, participants, contacts)
+        }.flatMapLatest { (showSenderDeleted, participants, contacts) ->
+            val matchingContactThreadIds = SearchMatching.matchingContactThreadIds(
+                search, deviceRegion, participants, contacts,
+            )
+            database.threadDao().observeThreads(
+                query = search,
+                source = source?.name,
+                showSenderDeleted = showSenderDeleted,
+                digits = numberTerms.digits,
+                digitsWithoutUsPrefix = numberTerms.digitsWithoutUsPrefix,
+                matchingContactThreadIds = matchingContactThreadIds,
+            ).map { rows ->
                 val recipientsByThread = participants.groupBy { it.threadId }
                 val contactsByNumber = contacts.associateBy { it.normalizedNumber }
                 rows.map { row ->

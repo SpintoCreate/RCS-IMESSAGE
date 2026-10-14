@@ -35,8 +35,11 @@ import com.google.android.mms.smil.SmilHelper
 import com.unifiedmessages.app.data.local.DeliveryStatus
 import com.unifiedmessages.app.data.local.UnifiedMessagesDatabase
 import com.unifiedmessages.app.provider.DeliveryUpdated
+import com.unifiedmessages.app.sms.CarrierThreadVerifier
+import com.unifiedmessages.app.sms.PhoneNumbers
 import com.unifiedmessages.app.sms.SmsEventProcessor
 import com.unifiedmessages.app.sms.TelephonyImporter
+import com.unifiedmessages.app.sms.ThreadRecipients
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -69,8 +72,10 @@ class MmsTransport @Inject constructor(
         }
         val recipients = database.threadDao().getParticipants(threadId)
             .filterNot { it.isSelf }
-            .map { it.address.trim() }.filter { it.isNotEmpty() }.distinct()
-        require(recipients.isNotEmpty()) { "This conversation has no recipient" }
+            .map { it.address }
+            .let { ThreadRecipients.requireSendableExisting(it, PhoneNumbers.deviceRegion(context)) }
+        CarrierThreadVerifier.requireSafeRecipients(context, database, thread, recipients)
+        val orderedRecipients = recipients.sorted()
 
         val subscriptionId = database.messageDao().getLatestSubscriptionId(threadId)
             ?.takeIf(SubscriptionManager::isValidSubscriptionId)
@@ -78,10 +83,10 @@ class MmsTransport @Inject constructor(
                 .takeIf(SubscriptionManager::isValidSubscriptionId)
             ?: error("Choose a default SMS SIM in Android settings before sending MMS")
         val manager = managerFor(subscriptionId)
-        val request = composeRequest(recipients, body, attachmentUris, subscriptionId, manager)
+        val request = composeRequest(orderedRecipients, body, attachmentUris, subscriptionId, manager)
         val pdu = PduComposer(context, request).make() ?: error("Could not encode MMS")
         val outboxUri = PduPersister.getPduPersister(context).persist(
-            request, Telephony.Mms.Outbox.CONTENT_URI, true, recipients.size > 1, null, subscriptionId,
+            request, Telephony.Mms.Outbox.CONTENT_URI, true, orderedRecipients.size > 1, null, subscriptionId,
         ) ?: error("Could not save MMS in system outbox")
         val systemId = ContentUris.parseId(outboxUri)
         val token = UUID.randomUUID().toString()
