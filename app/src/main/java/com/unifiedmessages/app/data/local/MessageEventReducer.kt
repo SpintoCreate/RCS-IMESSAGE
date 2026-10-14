@@ -206,11 +206,12 @@ class MessageEventReducer(private val store: MessageEventStore) {
                 ),
             )
         } else {
+            val newest = message.timestamp >= previousThread.updatedAt
             store.updateThread(
                 previousThread.copy(
-                    source = thread.source,
-                    title = thread.title,
-                    avatarText = thread.avatarText,
+                    source = if (newest) thread.source else previousThread.source,
+                    title = if (newest) thread.title else previousThread.title,
+                    avatarText = if (newest) thread.avatarText else previousThread.avatarText,
                     updatedAt = maxOf(previousThread.updatedAt, message.timestamp),
                 ),
             )
@@ -261,10 +262,13 @@ class MessageEventReducer(private val store: MessageEventStore) {
             // Replayed imports may carry newer read/delivery state, but cannot erase content/history.
             store.updateMessage(
                 previousMessage.copy(
+                    body = previousMessage.body ?: message.body,
+                    contentType = if (message.attachments.isNotEmpty()) ContentType.MEDIA else previousMessage.contentType,
                     isRead = previousMessage.isRead || message.isRead,
                     deliveryStatus = previousMessage.deliveryStatus.advanceTo(message.deliveryStatus),
                     subscriptionId = previousMessage.subscriptionId ?: message.subscriptionId,
                     systemUri = previousMessage.systemUri ?: message.systemUri,
+                    subject = previousMessage.subject ?: message.subject,
                 ),
             )
         }

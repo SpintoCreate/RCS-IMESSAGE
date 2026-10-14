@@ -44,7 +44,7 @@ import com.unifiedmessages.app.ui.components.AppSurface
 import com.unifiedmessages.app.ui.components.appHazeSource
 import com.unifiedmessages.app.ui.theme.LocalAppTheme
 
-/** First-launch introduction. It makes no claim that the preview can send or receive messages. */
+/** First-launch introduction; SMS role and permissions are requested after Get started. */
 @Composable
 fun WelcomeScreen(
     onContinue: () -> Unit,
@@ -112,7 +112,7 @@ fun WelcomeScreen(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Take a look around.",
+                    text = "Your messages in one place.",
                     color = theme.welcomeSecondary,
                     style = MaterialTheme.typography.bodyLarge,
                     textAlign = TextAlign.Center,
@@ -124,7 +124,7 @@ fun WelcomeScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
-                    text = "Sample preview · messaging not connected",
+                    text = "Next, connect SMS and MMS on this phone",
                     color = theme.welcomeSecondary,
                     style = MaterialTheme.typography.bodySmall,
                     textAlign = TextAlign.Center,

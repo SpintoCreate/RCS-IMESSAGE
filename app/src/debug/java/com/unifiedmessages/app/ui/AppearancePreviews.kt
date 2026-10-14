@@ -93,7 +93,7 @@ private fun ConversationAppearancePreview(
             searchQuery = "",
             onSearchQueryChange = {},
             canSend = false,
-            onSend = {},
+            onSend = { _, complete -> complete(true) },
             onBack = {},
             showBack = true,
             modifier = Modifier.fillMaxSize(),

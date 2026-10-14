@@ -194,7 +194,7 @@ fun SettingsScreen(
             }
         }
 
-        AppearanceHeading("ABOUT THIS PREVIEW", modifier = Modifier.padding(top = 35.dp))
+        AppearanceHeading("ABOUT UNIFIEDMESSAGES", modifier = Modifier.padding(top = 35.dp))
         StyleSurface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(22.dp),
@@ -203,13 +203,13 @@ fun SettingsScreen(
             Column {
                 Text("UnifiedMessages", style = MaterialTheme.typography.titleMedium, color = theme.onSurface)
                 Text(
-                    "Interface preview · sample messages",
+                    "SMS and MMS on this phone",
                     style = MaterialTheme.typography.labelMedium,
                     color = theme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),
                 )
                 Text(
-                    "All conversations are fictional samples stored in the app. This version does not access contacts, read messages, connect to iMessage or RCS, or send SMS.",
+                    "When you set UnifiedMessages as your default SMS app and grant permissions, it imports and sends SMS and MMS on this phone. iMessage and RCS are not connected yet.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = theme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 16.dp),

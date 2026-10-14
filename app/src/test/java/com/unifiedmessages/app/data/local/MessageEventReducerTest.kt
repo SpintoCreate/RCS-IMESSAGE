@@ -156,6 +156,44 @@ class MessageEventReducerTest {
         assertEquals(DeliveryStatus.DELIVERED, store.messages.values.single().deliveryStatus)
         assertEquals(4, store.events.size)
     }
+
+    @Test fun olderMmsImportCannotReplaceNewerSmsThreadMetadata() = runBlocking {
+        val store = InMemoryMessageEventStore()
+        val reducer = MessageEventReducer(store)
+        reducer.apply(MessageReceived(providerId, "new-sms", 200L, thread, message.copy(timestamp = 200L)))
+        reducer.apply(
+            MessageReceived(
+                providerId,
+                "old-mms",
+                100L,
+                thread.copy(source = "MMS", title = "Old group"),
+                message.copy(providerMessageId = "mms:1", timestamp = 100L),
+            ),
+        )
+
+        assertEquals("SMS", store.threads.values.single().source)
+        assertEquals("Alex", store.threads.values.single().title)
+        assertEquals(200L, store.threads.values.single().updatedAt)
+    }
+
+    @Test fun laterMmsPartsFillMissingContentWithoutLosingMessageIdentity() = runBlocking {
+        val store = InMemoryMessageEventStore()
+        val reducer = MessageEventReducer(store)
+        val early = ProviderMessage("mms:7", timestamp = 100L, contentType = ContentType.TEXT)
+        val complete = early.copy(
+            body = "Picture attached",
+            contentType = ContentType.MEDIA,
+            attachments = listOf(ProviderAttachment("part:7", "content://mms/part/7", "image/jpeg")),
+        )
+
+        assertTrue(reducer.apply(MessageReceived(providerId, "mms:early", 100L, thread, early)))
+        assertTrue(reducer.apply(MessageReceived(providerId, "mms:complete", 110L, thread, complete)))
+
+        assertEquals(1, store.messages.size)
+        assertEquals("Picture attached", store.messages.values.single().body)
+        assertEquals(ContentType.MEDIA, store.messages.values.single().contentType)
+        assertEquals(1, store.attachments.size)
+    }
 }
 
 private class InMemoryMessageEventStore : MessageEventStore {

@@ -1,6 +1,11 @@
 package com.unifiedmessages.app.data.repository
 
+import android.content.ContentValues
+import android.content.Context
+import android.net.Uri
+import android.provider.Telephony
 import com.unifiedmessages.app.data.local.ContentType
+import com.unifiedmessages.app.data.local.AttachmentEntity
 import com.unifiedmessages.app.data.local.DeliveryStatus
 import com.unifiedmessages.app.data.local.MessageDirection
 import com.unifiedmessages.app.data.local.MessageEntity
@@ -8,8 +13,10 @@ import com.unifiedmessages.app.data.local.ThreadEntity
 import com.unifiedmessages.app.data.local.ThreadSummary
 import com.unifiedmessages.app.data.local.UnifiedMessagesDatabase
 import com.unifiedmessages.app.model.ChatMessage
+import com.unifiedmessages.app.model.ChatAttachment
 import com.unifiedmessages.app.model.Conversation
 import com.unifiedmessages.app.model.MessageSource
+import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -22,10 +29,13 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** Room is the sole source of chat data; no fictional conversations are inserted at runtime. */
 @Singleton
 class MessagingRepository @Inject constructor(
+    @param:ApplicationContext private val context: Context,
     private val database: UnifiedMessagesDatabase,
     private val deletedMessagePreferences: DeletedMessagePreferences,
 ) {
@@ -39,15 +49,31 @@ class MessagingRepository @Inject constructor(
     fun observeConversation(threadId: String, query: String = ""): Flow<Conversation?> = combine(
         database.threadDao().observeThread(threadId),
         database.messageDao().observeMessagesMatching(threadId, query.trim()),
+        database.messageDao().observeAttachments(threadId),
         deletedMessagePreferences.showSenderDeletedMessages,
-    ) { thread, messages, showSenderDeleted ->
-        thread?.toConversation(messages, showSenderDeleted)
+    ) { thread, messages, attachments, showSenderDeleted ->
+        thread?.toConversation(messages, attachments, showSenderDeleted)
     }
 
     fun observeUnreadCount(threadId: String): Flow<Int> =
         database.threadDao().observeUnreadCount(threadId)
 
-    suspend fun markRead(threadId: String) = database.threadDao().markRead(threadId)
+    suspend fun markRead(threadId: String) = withContext(Dispatchers.IO) {
+        if (database.threadDao().getThread(threadId)?.providerId == "sms") {
+            val readValues = ContentValues().apply {
+                put(Telephony.Sms.READ, 1)
+                put(Telephony.Sms.SEEN, 1)
+            }
+            database.messageDao().getUnreadSystemUris(threadId).forEach { uri ->
+                try {
+                    context.contentResolver.update(Uri.parse(uri), readValues, null, null)
+                } catch (_: SecurityException) {
+                    // The default SMS role may have been removed while the chat was open.
+                }
+            }
+        }
+        database.threadDao().markRead(threadId)
+    }
 
     suspend fun setPinned(threadId: String, pinned: Boolean) =
         database.threadDao().setPinned(threadId, pinned)
@@ -71,9 +97,11 @@ class MessagingRepository @Inject constructor(
 
     private fun ThreadEntity.toConversation(
         messages: List<MessageEntity>,
+        attachments: List<AttachmentEntity>,
         showSenderDeleted: Boolean,
     ): Conversation {
         val visible = messages.filter { !it.isDeleted || it.deletedBySender && showSenderDeleted }
+        val attachmentsByMessage = attachments.groupBy { it.messageId }
         return Conversation(
             id = id,
             title = title,
@@ -83,15 +111,21 @@ class MessagingRepository @Inject constructor(
             unreadCount = messages.count { it.direction == MessageDirection.INCOMING && !it.isRead && !it.isDeleted },
             isPinned = isPinned,
             messages = visible.map { message ->
+                val messageAttachments = if (message.isDeleted) emptyList() else attachmentsByMessage[message.id].orEmpty()
+                val body = if (message.isDeleted) "Deleted by sender" else displayBody(
+                    message.body,
+                    message.contentType,
+                    message.subject,
+                )
                 ChatMessage(
                     id = message.id,
-                    text = if (message.isDeleted) "Deleted by sender" else displayBody(
-                        message.body,
-                        message.contentType,
-                        message.subject,
-                    ),
+                    text = if (messageAttachments.isEmpty()) body else {
+                        val label = if (messageAttachments.size == 1) "Media attachment" else "${messageAttachments.size} media attachments"
+                        if (body.isBlank() || body == "Media attachment") label else "$body\n$label"
+                    },
                     time = formatMessageTimestamp(message.timestamp, message.deliveryStatus, message.direction),
                     isMine = message.direction == MessageDirection.OUTGOING,
+                    attachments = messageAttachments.map { ChatAttachment(it.contentUri.orEmpty(), it.mimeType, it.fileName) },
                 )
             },
         )

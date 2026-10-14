@@ -88,12 +88,21 @@ interface ThreadDao {
 
     @Query("SELECT * FROM participants WHERE id = :id LIMIT 1")
     suspend fun getParticipant(id: String): ParticipantEntity?
+
+    @Query("SELECT * FROM participants WHERE threadId = :threadId AND isSelf = 0 ORDER BY address")
+    suspend fun getParticipants(threadId: String): List<ParticipantEntity>
 }
 
 @Dao
 interface MessageDao {
     @Query("SELECT * FROM messages WHERE id = :id LIMIT 1")
     suspend fun getMessage(id: String): MessageEntity?
+
+    @Query("SELECT systemUri FROM messages WHERE threadId = :threadId AND direction = 'INCOMING' AND isRead = 0 AND systemUri IS NOT NULL")
+    suspend fun getUnreadSystemUris(threadId: String): List<String>
+
+    @Query("SELECT subscriptionId FROM messages WHERE threadId = :threadId AND subscriptionId IS NOT NULL AND subscriptionId >= 0 ORDER BY timestamp DESC, id DESC LIMIT 1")
+    suspend fun getLatestSubscriptionId(threadId: String): Int?
 
     @Query("SELECT * FROM messages WHERE threadId = :threadId ORDER BY timestamp ASC, id ASC")
     fun observeMessages(threadId: String): Flow<List<MessageEntity>>
@@ -106,10 +115,11 @@ interface MessageDao {
     fun observeMessagesMatching(threadId: String, query: String): Flow<List<MessageEntity>>
 
     @Query(
-        """SELECT * FROM messages WHERE threadId = :threadId AND direction = 'INCOMING'
-           AND body = :body ORDER BY timestamp DESC LIMIT 1""",
+        """SELECT * FROM messages WHERE threadId = :threadId AND body = :body
+           AND contentType = 'TEXT' AND isDeleted = 0 AND timestamp <= :beforeTimestamp
+           ORDER BY timestamp DESC, id DESC LIMIT 1""",
     )
-    suspend fun findRecentIncomingText(threadId: String, body: String): MessageEntity?
+    suspend fun findRecentText(threadId: String, body: String, beforeTimestamp: Long): MessageEntity?
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(message: MessageEntity): Long
@@ -131,6 +141,12 @@ interface MessageDao {
            ORDER BY createdAt DESC, id DESC LIMIT 1""",
     )
     suspend fun getLatestReaction(messageId: String, providerReactionId: String): ReactionEntity?
+
+    @Query(
+        """SELECT * FROM reactions WHERE messageId = :messageId AND actorAddress = :actorAddress
+           AND emoji = :emoji AND removedAt IS NULL ORDER BY createdAt DESC, id DESC LIMIT 1""",
+    )
+    suspend fun getLatestActiveReaction(messageId: String, actorAddress: String, emoji: String): ReactionEntity?
 
     @Update
     suspend fun updateReaction(reaction: ReactionEntity)

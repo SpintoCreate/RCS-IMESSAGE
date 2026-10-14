@@ -13,6 +13,13 @@ data class ChatMessage(
     val text: String,
     val time: String,
     val isMine: Boolean,
+    val attachments: List<ChatAttachment> = emptyList(),
+)
+
+data class ChatAttachment(
+    val uri: String,
+    val mimeType: String,
+    val fileName: String?,
 )
 
 data class Conversation(

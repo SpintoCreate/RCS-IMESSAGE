@@ -1,6 +1,7 @@
 package com.unifiedmessages.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -65,13 +66,14 @@ fun ConversationScreen(
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
     canSend: Boolean,
-    onSend: (String) -> Unit,
+    onSend: (String, (Boolean) -> Unit) -> Unit,
     onBack: () -> Unit,
     showBack: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val palette = LocalAppTheme.current
     var draft by rememberSaveable(conversation.id) { mutableStateOf("") }
+    var sendPending by remember(conversation.id) { mutableStateOf(false) }
     var searchOpen by rememberSaveable(conversation.id) { mutableStateOf(false) }
     val visibleMessages = conversation.messages
 
@@ -255,9 +257,13 @@ fun ConversationScreen(
                     AppFab(
                         modifier = Modifier.size(52.dp),
                         shape = CircleShape,
-                        onClick = if (canSend && draft.isNotBlank()) ({
-                            onSend(draft.trim())
-                            draft = ""
+                        onClick = if (canSend && draft.isNotBlank() && !sendPending) ({
+                            val submitted = draft.trim()
+                            sendPending = true
+                            onSend(submitted) { accepted ->
+                                sendPending = false
+                                if (accepted && draft.trim() == submitted) draft = ""
+                            }
                         }) else null,
                         contentDescription = if (canSend) "Send message" else "Send unavailable",
                     ) {
@@ -277,6 +283,7 @@ fun ConversationScreen(
 @Composable
 private fun MessageBubble(message: ChatMessage) {
     val palette = LocalAppTheme.current
+    var attachmentsOpen by remember(message.id) { mutableStateOf(false) }
     val shape = RoundedCornerShape(
         topStart = 16.dp,
         topEnd = 16.dp,
@@ -292,6 +299,9 @@ private fun MessageBubble(message: ChatMessage) {
         Column(horizontalAlignment = if (message.isMine) Alignment.End else Alignment.Start) {
             AppBubble(
                 outgoing = message.isMine,
+                modifier = if (message.attachments.isNotEmpty()) {
+                    Modifier.clickable(onClickLabel = "Open media attachments") { attachmentsOpen = true }
+                } else Modifier,
                 shape = shape,
                 contentPadding = PaddingValues(horizontal = 13.dp, vertical = 9.dp),
             ) {
@@ -309,5 +319,8 @@ private fun MessageBubble(message: ChatMessage) {
                 modifier = Modifier.padding(top = 4.dp, start = 3.dp, end = 3.dp),
             )
         }
+    }
+    if (attachmentsOpen) {
+        MessageAttachmentsDialog(message.attachments, onDismiss = { attachmentsOpen = false })
     }
 }

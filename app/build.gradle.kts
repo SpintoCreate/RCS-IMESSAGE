@@ -63,6 +63,8 @@ dependencies {
     implementation("androidx.hilt:hilt-navigation-compose:1.3.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4")
     implementation("dev.chrisbanes.haze:haze:1.6.10")
+    // PDU encoding/persistence only; platform SmsManager handles MMS transfer and callbacks.
+    implementation("com.klinkerapps:android-smsmms:5.2.6")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
 }
