@@ -8,10 +8,10 @@ import org.junit.Test
 
 class AppearanceContrastTest {
     @Test
-    fun `secondary text badges overlays and fab stay readable in blue and lime appearances`() {
+    fun `secondary text badges overlays and fab stay readable with every preset`() {
         for (style in SurfaceStyle.entries) {
             for (brightness in listOf(Brightness.LIGHT, Brightness.DARK)) {
-                for (accent in listOf(AccentPresets.first(), AccentPresets.first { it.name == "Lime" })) {
+                for (accent in AccentPresets) {
                     val theme = resolveAppTheme(
                         AppearanceSettings(style = style, brightness = brightness, accentArgb = accent.argb),
                         systemDark = false,

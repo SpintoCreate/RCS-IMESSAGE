@@ -113,7 +113,16 @@ private fun SurfaceLayer(
         else -> theme.onSurface
     }
     val layer = if (role == SurfaceRole.TOP_BAR && theme.style == SurfaceStyle.SOLID) {
-        Modifier.background(base)
+        // Messages can scroll behind the header; fade only its lower edge into the background.
+        Modifier.background(
+            Brush.verticalGradient(
+                0f to base,
+                0.72f to base,
+                0.88f to base.copy(alpha = 0.8f),
+                0.96f to base.copy(alpha = 0.25f),
+                1f to Color.Transparent,
+            ),
+        )
     } else if (role == SurfaceRole.TOP_BAR) {
         // No outline or rectangular haze edge: the header merges with the wallpaper below.
         Modifier.background(

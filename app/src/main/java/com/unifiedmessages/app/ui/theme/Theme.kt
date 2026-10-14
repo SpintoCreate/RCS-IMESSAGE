@@ -108,7 +108,7 @@ fun resolveAppTheme(settings: AppearanceSettings, systemDark: Boolean): AppTheme
     }
     val accent = settings.accent
     val defaultAccent = normalizeAccentArgb(settings.accentArgb) == AccentPresets.first().argb
-    val onAccent = if (accent.luminance() > 0.18f) Color(0xFF101114) else Color.White
+    val onAccent = if (accent.luminance() > 0.18f) Color.Black else Color.White
     val glass = settings.style == SurfaceStyle.LIQUID_GLASS
 
     val glassTokens = if (glass) {

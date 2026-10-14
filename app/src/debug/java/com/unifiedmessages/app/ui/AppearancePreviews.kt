@@ -22,12 +22,17 @@ import com.unifiedmessages.app.ui.theme.LocalAppTheme
 import com.unifiedmessages.app.ui.theme.SurfaceStyle
 import com.unifiedmessages.app.ui.theme.UnifiedMessagesTheme
 
-/** Android Studio renders each screen in all four appearances with blue and lime accents. */
+/** Android Studio renders each screen in all four appearances with four representative accents. */
 class AppearancePreviewVariants : PreviewParameterProvider<AppearanceSettings> {
     override val values: Sequence<AppearanceSettings> = sequence {
         for (style in SurfaceStyle.entries) {
             for (brightness in listOf(Brightness.LIGHT, Brightness.DARK)) {
-                for (accent in listOf(0xFF0735FF.toInt(), 0xFF6F8700.toInt())) {
+                for (accent in listOf(
+                    0xFF0735FF.toInt(), // Electric Blue
+                    0xFF6F8700.toInt(), // Lime
+                    0xFFB66A00.toInt(), // Amber
+                    0xFF087FCB.toInt(), // Sky
+                )) {
                     yield(AppearanceSettings(style = style, brightness = brightness, accentArgb = accent))
                 }
             }
@@ -49,7 +54,7 @@ private fun AppearancePreviewFrame(
     }
 }
 
-@Preview(name = "Welcome · blue and lime", widthDp = 393, heightDp = 873)
+@Preview(name = "Welcome · four accents", widthDp = 393, heightDp = 873)
 @Composable
 private fun WelcomeAppearancePreview(
     @PreviewParameter(AppearancePreviewVariants::class) settings: AppearanceSettings,
@@ -59,7 +64,7 @@ private fun WelcomeAppearancePreview(
     }
 }
 
-@Preview(name = "Chats · blue and lime", widthDp = 393, heightDp = 873)
+@Preview(name = "Chats · four accents", widthDp = 393, heightDp = 873)
 @Composable
 private fun InboxAppearancePreview(
     @PreviewParameter(AppearancePreviewVariants::class) settings: AppearanceSettings,
@@ -81,7 +86,7 @@ private fun InboxAppearancePreview(
     }
 }
 
-@Preview(name = "Conversation · blue and lime", widthDp = 393, heightDp = 873)
+@Preview(name = "Conversation · four accents", widthDp = 393, heightDp = 873)
 @Composable
 private fun ConversationAppearancePreview(
     @PreviewParameter(AppearancePreviewVariants::class) settings: AppearanceSettings,
@@ -100,7 +105,7 @@ private fun ConversationAppearancePreview(
     }
 }
 
-@Preview(name = "Settings · blue and lime", widthDp = 393, heightDp = 873)
+@Preview(name = "Settings · four accents", widthDp = 393, heightDp = 873)
 @Composable
 private fun SettingsAppearancePreview(
     @PreviewParameter(AppearancePreviewVariants::class) settings: AppearanceSettings,
@@ -119,7 +124,7 @@ private fun SettingsAppearancePreview(
     }
 }
 
-@Preview(name = "Dialog · blue and lime", widthDp = 393, heightDp = 873)
+@Preview(name = "Dialog · four accents", widthDp = 393, heightDp = 873)
 @Composable
 private fun DialogAppearancePreview(
     @PreviewParameter(AppearancePreviewVariants::class) settings: AppearanceSettings,
