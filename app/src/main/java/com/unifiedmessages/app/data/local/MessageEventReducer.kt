@@ -20,6 +20,10 @@ import java.util.UUID
 
 /** Provider-local IDs become stable app IDs without collisions across transports or entity kinds. */
 object ProviderIds {
+    /** Existing local SMS IDs stay unchanged; other logins get distinct ID namespaces. */
+    fun namespace(providerId: String, accountId: String): String =
+        if (accountId == "$providerId:local") providerId else "$providerId@$accountId"
+
     fun thread(providerId: String, providerThreadId: String): String = id("thread", providerId, providerThreadId)
     fun message(providerId: String, providerMessageId: String): String = id("message", providerId, providerMessageId)
     fun participant(providerId: String, providerThreadId: String, address: String): String =
@@ -29,6 +33,8 @@ object ProviderIds {
     fun reaction(providerId: String, providerMessageId: String, providerReactionId: String, addEventId: String): String =
         id("reaction", providerId, providerMessageId, providerReactionId, addEventId)
     fun event(providerId: String, providerEventId: String): String = id("event", providerId, providerEventId)
+    fun mapping(accountId: String, entityType: String, remoteId: String): String =
+        id("remote-mapping", accountId, entityType, remoteId)
 
     private fun id(vararg parts: String): String {
         val bytes = ByteArrayOutputStream().also { stream ->
@@ -61,6 +67,7 @@ interface MessageEventStore {
     suspend fun pendingForTarget(targetMessageId: String): List<PendingProviderEventEntity>
     suspend fun insertPending(event: PendingProviderEventEntity)
     suspend fun deletePending(id: String)
+    suspend fun insertMapping(mapping: RemoteIdMappingEntity)
 }
 
 class RoomMessageEventStore(private val database: UnifiedMessagesDatabase) : MessageEventStore {
@@ -93,6 +100,9 @@ class RoomMessageEventStore(private val database: UnifiedMessagesDatabase) : Mes
         database.providerSyncDao().insertPending(event)
     }
     override suspend fun deletePending(id: String) { database.providerSyncDao().deletePending(id) }
+    override suspend fun insertMapping(mapping: RemoteIdMappingEntity) {
+        database.providerSyncDao().insertMapping(mapping)
+    }
 }
 
 /** Applies each provider event atomically. Unknown targets remain retryable (the event is not acknowledged). */
@@ -102,25 +112,26 @@ class MessageEventReducer(private val store: MessageEventStore) {
     /** Returns false for a replay or an event whose target has not arrived yet. */
     suspend fun apply(event: MessageEvent): Boolean = store.transaction {
         require(event.providerId.isNotBlank() && event.eventId.isNotBlank()) { "Provider and event IDs must be stable" }
-        val eventKey = ProviderIds.event(event.providerId, event.eventId)
+        val identity = ProviderIds.namespace(event.providerId, event.accountId)
+        val eventKey = ProviderIds.event(identity, event.eventId)
         if (store.hasEvent(eventKey)) return@transaction false
 
         val applied = when (event) {
             is MessageReceived -> upsertMessage(
-                event.providerId, event.thread, event.message, MessageDirection.INCOMING,
+                event.providerId, event.accountId, event.thread, event.message, MessageDirection.INCOMING,
             )
             is MessageSent -> upsertMessage(
-                event.providerId, event.thread, event.message, MessageDirection.OUTGOING,
+                event.providerId, event.accountId, event.thread, event.message, MessageDirection.OUTGOING,
             )
             is ReactionAdded -> {
-                val messageId = ProviderIds.message(event.providerId, event.providerMessageId)
+                val messageId = ProviderIds.message(identity, event.providerMessageId)
                 if (store.getMessage(messageId) == null) false else {
                     val latest = store.getLatestReaction(messageId, event.reactionId)
                     if (latest == null || latest.removedAt != null) {
                         store.insertReaction(
                             ReactionEntity(
                                 id = ProviderIds.reaction(
-                                    event.providerId, event.providerMessageId, event.reactionId, event.eventId,
+                                    identity, event.providerMessageId, event.reactionId, event.eventId,
                                 ),
                                 messageId = messageId,
                                 providerReactionId = event.reactionId,
@@ -134,7 +145,7 @@ class MessageEventReducer(private val store: MessageEventStore) {
                 }
             }
             is ReactionRemoved -> {
-                val messageId = ProviderIds.message(event.providerId, event.providerMessageId)
+                val messageId = ProviderIds.message(identity, event.providerMessageId)
                 val reaction = store.getLatestReaction(messageId, event.reactionId)
                 if (reaction == null) false else {
                     if (reaction.removedAt == null) store.updateReaction(reaction.copy(removedAt = event.occurredAt))
@@ -142,7 +153,7 @@ class MessageEventReducer(private val store: MessageEventStore) {
                 }
             }
             is MessageEdited -> {
-                val message = store.getMessage(ProviderIds.message(event.providerId, event.providerMessageId))
+                val message = store.getMessage(ProviderIds.message(identity, event.providerMessageId))
                 if (message == null) false else {
                     store.insertEdit(
                         MessageEditEntity(
@@ -160,7 +171,7 @@ class MessageEventReducer(private val store: MessageEventStore) {
                 }
             }
             is MessageDeleted -> {
-                val message = store.getMessage(ProviderIds.message(event.providerId, event.providerMessageId))
+                val message = store.getMessage(ProviderIds.message(identity, event.providerMessageId))
                 if (message == null) false else {
                     store.insertDeletion(
                         MessageDeletionEntity(
@@ -177,7 +188,7 @@ class MessageEventReducer(private val store: MessageEventStore) {
                 }
             }
             is DeliveryUpdated -> {
-                val message = store.getMessage(ProviderIds.message(event.providerId, event.providerMessageId))
+                val message = store.getMessage(ProviderIds.message(identity, event.providerMessageId))
                 if (message == null) false else {
                     store.updateMessage(
                         message.copy(deliveryStatus = message.deliveryStatus.advanceTo(event.status)),
@@ -192,9 +203,9 @@ class MessageEventReducer(private val store: MessageEventStore) {
             )
             if (event is MessageReceived || event is MessageSent || event is ReactionAdded) {
                 val targetId = when (event) {
-                    is MessageReceived -> ProviderIds.message(event.providerId, event.message.providerMessageId)
-                    is MessageSent -> ProviderIds.message(event.providerId, event.message.providerMessageId)
-                    is ReactionAdded -> ProviderIds.message(event.providerId, event.providerMessageId)
+                    is MessageReceived -> ProviderIds.message(identity, event.message.providerMessageId)
+                    is MessageSent -> ProviderIds.message(identity, event.message.providerMessageId)
+                    is ReactionAdded -> ProviderIds.message(identity, event.providerMessageId)
                     else -> error("unreachable")
                 }
                 replayPending(targetId)
@@ -204,10 +215,10 @@ class MessageEventReducer(private val store: MessageEventStore) {
                 store.insertPending(
                     PendingProviderEventEntity(
                         id = eventKey,
-                        accountId = "${event.providerId}:local",
+                        accountId = event.accountId,
                         providerId = event.providerId,
                         eventId = event.eventId,
-                        targetMessageId = ProviderIds.message(event.providerId, encoded.first),
+                        targetMessageId = ProviderIds.message(identity, encoded.first),
                         remoteMessageId = encoded.first,
                         eventType = encoded.second,
                         payload = encoded.third,
@@ -236,6 +247,7 @@ class MessageEventReducer(private val store: MessageEventStore) {
 
     private suspend fun upsertMessage(
         providerId: String,
+        accountId: String,
         thread: ProviderThread,
         message: ProviderMessage,
         direction: MessageDirection,
@@ -243,7 +255,12 @@ class MessageEventReducer(private val store: MessageEventStore) {
         require(thread.providerThreadId.isNotBlank() && message.providerMessageId.isNotBlank()) {
             "Provider thread and message IDs must be stable"
         }
-        val threadId = ProviderIds.thread(providerId, thread.providerThreadId)
+        val identity = ProviderIds.namespace(providerId, accountId)
+        val threadId = ProviderIds.thread(identity, thread.providerThreadId)
+        store.insertMapping(RemoteIdMappingEntity(
+            ProviderIds.mapping(accountId, "thread", thread.providerThreadId),
+            accountId, "thread", thread.providerThreadId, threadId,
+        ))
         val previousThread = store.getThread(threadId)
         if (previousThread == null) {
             store.insertThread(
@@ -255,7 +272,7 @@ class MessageEventReducer(private val store: MessageEventStore) {
                     title = thread.title,
                     avatarText = thread.avatarText,
                     updatedAt = message.timestamp,
-                    accountId = "$providerId:local",
+                    accountId = accountId,
                     networkType = thread.source.uppercase(),
                 ),
             )
@@ -277,7 +294,7 @@ class MessageEventReducer(private val store: MessageEventStore) {
                 ?.let { com.unifiedmessages.app.provider.ProviderParticipant(address = it) },
         )
         participants.distinctBy { it.address }.forEach { incoming ->
-            val id = ProviderIds.participant(providerId, thread.providerThreadId, incoming.address)
+            val id = ProviderIds.participant(identity, thread.providerThreadId, incoming.address)
             val existing = store.getParticipant(id)
             if (existing == null) {
                 store.insertParticipant(
@@ -293,7 +310,11 @@ class MessageEventReducer(private val store: MessageEventStore) {
             }
         }
 
-        val messageId = ProviderIds.message(providerId, message.providerMessageId)
+        val messageId = ProviderIds.message(identity, message.providerMessageId)
+        store.insertMapping(RemoteIdMappingEntity(
+            ProviderIds.mapping(accountId, "message", message.providerMessageId),
+            accountId, "message", message.providerMessageId, messageId,
+        ))
         val previousMessage = store.getMessage(messageId)
         if (previousMessage == null) {
             store.insertMessage(
@@ -330,7 +351,7 @@ class MessageEventReducer(private val store: MessageEventStore) {
         message.attachments.forEach { attachment ->
             store.insertAttachment(
                 AttachmentEntity(
-                    id = ProviderIds.attachment(providerId, message.providerMessageId, attachment.providerAttachmentId),
+                    id = ProviderIds.attachment(identity, message.providerMessageId, attachment.providerAttachmentId),
                     messageId = messageId,
                     providerAttachmentId = attachment.providerAttachmentId,
                     contentUri = attachment.contentUri,
@@ -401,17 +422,17 @@ private object PendingEventCodec {
             when (pending.eventType) {
                 "ReactionAdded" -> com.unifiedmessages.app.provider.ReactionAdded(
                     pending.providerId, pending.eventId, pending.occurredAt,
-                    remoteId, input.readUTF(), input.readUTF(), input.readUTF(),
+                    remoteId, input.readUTF(), input.readUTF(), input.readUTF(), pending.accountId,
                 )
                 "ReactionRemoved" -> com.unifiedmessages.app.provider.ReactionRemoved(
-                    pending.providerId, pending.eventId, pending.occurredAt, remoteId, input.readUTF(),
+                    pending.providerId, pending.eventId, pending.occurredAt, remoteId, input.readUTF(), pending.accountId,
                 )
                 "MessageEdited" -> MessageEdited(
                     pending.providerId, pending.eventId, pending.occurredAt, remoteId,
-                    if (input.readBoolean()) input.readUTF() else null,
+                    if (input.readBoolean()) input.readUTF() else null, pending.accountId,
                 )
                 "MessageDeleted" -> MessageDeleted(
-                    pending.providerId, pending.eventId, pending.occurredAt, remoteId, input.readBoolean(),
+                    pending.providerId, pending.eventId, pending.occurredAt, remoteId, input.readBoolean(), pending.accountId,
                 )
                 else -> error("Unknown pending event type: ${pending.eventType}")
             }

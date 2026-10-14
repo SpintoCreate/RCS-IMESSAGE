@@ -58,6 +58,8 @@ data class ProviderMessage(
 
 sealed interface MessageEvent {
     val providerId: String
+    val accountId: String
+        get() = "$providerId:local"
     val eventId: String
     val occurredAt: Long
 }
@@ -68,6 +70,7 @@ data class MessageReceived(
     override val occurredAt: Long,
     val thread: ProviderThread,
     val message: ProviderMessage,
+    override val accountId: String = "$providerId:local",
 ) : MessageEvent
 
 data class MessageSent(
@@ -76,6 +79,7 @@ data class MessageSent(
     override val occurredAt: Long,
     val thread: ProviderThread,
     val message: ProviderMessage,
+    override val accountId: String = "$providerId:local",
 ) : MessageEvent
 
 data class ReactionAdded(
@@ -86,6 +90,7 @@ data class ReactionAdded(
     val reactionId: String,
     val actorAddress: String,
     val emoji: String,
+    override val accountId: String = "$providerId:local",
 ) : MessageEvent
 
 data class ReactionRemoved(
@@ -94,6 +99,7 @@ data class ReactionRemoved(
     override val occurredAt: Long,
     val providerMessageId: String,
     val reactionId: String,
+    override val accountId: String = "$providerId:local",
 ) : MessageEvent
 
 data class MessageEdited(
@@ -102,6 +108,7 @@ data class MessageEdited(
     override val occurredAt: Long,
     val providerMessageId: String,
     val newBody: String?,
+    override val accountId: String = "$providerId:local",
 ) : MessageEvent
 
 data class MessageDeleted(
@@ -110,6 +117,7 @@ data class MessageDeleted(
     override val occurredAt: Long,
     val providerMessageId: String,
     val bySender: Boolean,
+    override val accountId: String = "$providerId:local",
 ) : MessageEvent
 
 data class DeliveryUpdated(
@@ -118,4 +126,5 @@ data class DeliveryUpdated(
     override val occurredAt: Long,
     val providerMessageId: String,
     val status: DeliveryStatus,
+    override val accountId: String = "$providerId:local",
 ) : MessageEvent

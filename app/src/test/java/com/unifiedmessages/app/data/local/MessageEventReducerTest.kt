@@ -46,6 +46,20 @@ class MessageEventReducerTest {
         assertNotEquals(ProviderIds.message("sms", "sms:42"), ProviderIds.message("rcs", "sms:42"))
     }
 
+    @Test fun sameRemoteIdsInTwoAccountsDoNotCollide() = runBlocking {
+        val store = InMemoryMessageEventStore()
+        val reducer = MessageEventReducer(store)
+        val room = thread.copy(providerThreadId = "!room:matrix.org", source = "MATRIX")
+        val matrixMessage = message.copy(providerMessageId = "$" + "event")
+        assertTrue(reducer.apply(MessageReceived("matrix", "same-event", 100L, room, matrixMessage,
+            accountId = "matrix:@one:matrix.org")))
+        assertTrue(reducer.apply(MessageReceived("matrix", "same-event", 100L, room, matrixMessage,
+            accountId = "matrix:@two:matrix.org")))
+        assertEquals(2, store.threads.size)
+        assertEquals(2, store.messages.size)
+        assertEquals(2, store.events.size)
+    }
+
     @Test fun editsAndSenderDeletionRetainOriginalHistoryAndMessageRow() = runBlocking {
         val store = InMemoryMessageEventStore()
         val reducer = MessageEventReducer(store)
@@ -254,6 +268,7 @@ private class InMemoryMessageEventStore : MessageEventStore {
     val edits = mutableListOf<MessageEditEntity>()
     val deletions = mutableListOf<MessageDeletionEntity>()
     val pending = linkedMapOf<String, PendingProviderEventEntity>()
+    val mappings = linkedMapOf<String, RemoteIdMappingEntity>()
 
     override suspend fun <T> transaction(block: suspend () -> T): T = block()
     override suspend fun hasEvent(id: String): Boolean = events.containsKey(id)
@@ -278,4 +293,5 @@ private class InMemoryMessageEventStore : MessageEventStore {
         pending.values.filter { it.targetMessageId == targetMessageId }.sortedWith(compareBy({ it.occurredAt }, { it.id }))
     override suspend fun insertPending(event: PendingProviderEventEntity) { pending.putIfAbsent(event.id, event) }
     override suspend fun deletePending(id: String) { pending.remove(id) }
+    override suspend fun insertMapping(mapping: RemoteIdMappingEntity) { mappings.putIfAbsent(mapping.id, mapping) }
 }
