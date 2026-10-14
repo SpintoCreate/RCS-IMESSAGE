@@ -1,9 +1,11 @@
 package com.unifiedmessages.app.ui
 
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,12 +21,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -32,6 +36,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -50,12 +55,15 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.unifiedmessages.app.model.ChatMessage
 import com.unifiedmessages.app.model.Conversation
+import com.unifiedmessages.app.model.MessageSource
+import com.unifiedmessages.app.data.local.DeliveryStatus
 import com.unifiedmessages.app.ui.components.AppBubble
 import com.unifiedmessages.app.ui.components.AppFab
 import com.unifiedmessages.app.ui.components.AppInputBar
 import com.unifiedmessages.app.ui.components.AppSurface
 import com.unifiedmessages.app.ui.components.AppTopBar
 import com.unifiedmessages.app.ui.components.ContactAvatar
+import com.unifiedmessages.app.ui.components.SmsAccessBanner
 import com.unifiedmessages.app.ui.components.SourceBadge
 import com.unifiedmessages.app.ui.theme.LocalAppTheme
 import com.unifiedmessages.app.ui.theme.SurfaceStyle
@@ -66,7 +74,13 @@ fun ConversationScreen(
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
     canSend: Boolean,
-    onSend: (String, (Boolean) -> Unit) -> Unit,
+    onSend: (String, List<Uri>, (Boolean) -> Unit) -> Unit,
+    attachments: List<Uri> = emptyList(),
+    onAttach: () -> Unit = {},
+    onRemoveAttachment: (Uri) -> Unit = {},
+    onRetry: (String) -> Unit = {},
+    smsAccessBanner: String? = null,
+    onRequestSmsAccess: () -> Unit = {},
     onBack: () -> Unit,
     showBack: Boolean,
     modifier: Modifier = Modifier,
@@ -121,7 +135,7 @@ fun ConversationScreen(
                 }
             }
             items(visibleMessages, key = { it.id }) { message ->
-                MessageBubble(message)
+                MessageBubble(message, onRetry)
             }
         }
 
@@ -163,7 +177,9 @@ fun ConversationScreen(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(Modifier.height(4.dp))
-                    SourceBadge(source = conversation.source.label)
+                    if (conversation.source == MessageSource.SMS) {
+                        SourceBadge(source = conversation.source.label)
+                    }
                 }
 
                 IconButton(
@@ -179,6 +195,10 @@ fun ConversationScreen(
                         tint = palette.onSurface,
                     )
                 }
+            }
+
+            if (smsAccessBanner != null) {
+                SmsAccessBanner(smsAccessBanner, onRequestSmsAccess)
             }
 
             if (searchOpen) {
@@ -221,11 +241,26 @@ fun ConversationScreen(
         ) {
             Column {
                 Text(
-                    text = if (canSend) "SMS" else "Messaging unavailable for this chat",
+                    text = if (canSend) "SMS" else "This sender can't receive replies",
                     style = MaterialTheme.typography.labelSmall,
                     color = palette.onSurfaceVariant,
                     modifier = Modifier.padding(start = 12.dp, bottom = 8.dp),
                 )
+                if (attachments.isNotEmpty()) {
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                        attachments.forEachIndexed { index, attachment ->
+                            TextButton(onClick = { onRemoveAttachment(attachment) }) {
+                                Text("Media ${index + 1}", color = palette.onSurface)
+                                Icon(
+                                    Icons.Outlined.Close,
+                                    contentDescription = "Remove media attachment ${index + 1}",
+                                    tint = palette.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                        }
+                    }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     AppSurface(
                         modifier = Modifier.weight(1f),
@@ -236,7 +271,17 @@ fun ConversationScreen(
                             value = draft,
                             onValueChange = { draft = it },
                             modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text(if (canSend) "Message" else "Write a draft") },
+                            enabled = canSend,
+                            placeholder = { Text(if (canSend) "Message" else "This sender can't receive replies") },
+                            trailingIcon = {
+                                IconButton(onClick = onAttach, enabled = canSend && !sendPending) {
+                                    Icon(
+                                        Icons.Outlined.AttachFile,
+                                        contentDescription = "Attach media",
+                                        tint = palette.onSurfaceVariant,
+                                    )
+                                }
+                            },
                             minLines = 1,
                             maxLines = 4,
                             shape = RoundedCornerShape(28.dp),
@@ -245,10 +290,14 @@ fun ConversationScreen(
                                 unfocusedContainerColor = Color.Transparent,
                                 focusedTextColor = palette.onBubbleIncoming,
                                 unfocusedTextColor = palette.onBubbleIncoming,
+                                disabledTextColor = palette.onSurfaceVariant,
                                 focusedPlaceholderColor = palette.onSurfaceVariant,
                                 unfocusedPlaceholderColor = palette.onSurfaceVariant,
+                                disabledPlaceholderColor = palette.onSurfaceVariant,
+                                disabledContainerColor = Color.Transparent,
                                 focusedIndicatorColor = Color.Transparent,
                                 unfocusedIndicatorColor = Color.Transparent,
+                                disabledIndicatorColor = Color.Transparent,
                                 cursorColor = palette.accent,
                             ),
                         )
@@ -257,10 +306,11 @@ fun ConversationScreen(
                     AppFab(
                         modifier = Modifier.size(52.dp),
                         shape = CircleShape,
-                        onClick = if (canSend && draft.isNotBlank() && !sendPending) ({
+                        onClick = if (canSend && (draft.isNotBlank() || attachments.isNotEmpty()) && !sendPending) ({
                             val submitted = draft.trim()
+                            val submittedAttachments = attachments.toList()
                             sendPending = true
-                            onSend(submitted) { accepted ->
+                            onSend(submitted, submittedAttachments) { accepted ->
                                 sendPending = false
                                 if (accepted && draft.trim() == submitted) draft = ""
                             }
@@ -281,7 +331,7 @@ fun ConversationScreen(
 }
 
 @Composable
-private fun MessageBubble(message: ChatMessage) {
+private fun MessageBubble(message: ChatMessage, onRetry: (String) -> Unit) {
     val palette = LocalAppTheme.current
     var attachmentsOpen by remember(message.id) { mutableStateOf(false) }
     val shape = RoundedCornerShape(
@@ -318,6 +368,11 @@ private fun MessageBubble(message: ChatMessage) {
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.padding(top = 4.dp, start = 3.dp, end = 3.dp),
             )
+            if (message.isMine && message.deliveryStatus == DeliveryStatus.FAILED) {
+                TextButton(onClick = { onRetry(message.id) }) {
+                    Text("Retry", color = palette.accent)
+                }
+            }
         }
     }
     if (attachmentsOpen) {

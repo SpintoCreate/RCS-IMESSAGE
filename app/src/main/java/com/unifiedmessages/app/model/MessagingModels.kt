@@ -1,5 +1,7 @@
 package com.unifiedmessages.app.model
 
+import com.unifiedmessages.app.data.local.DeliveryStatus
+
 /** The source shown in the existing chat badges. Provider integrations map to this display value. */
 enum class MessageSource(val label: String) {
     IMESSAGE("iMessage"),
@@ -14,6 +16,7 @@ data class ChatMessage(
     val time: String,
     val isMine: Boolean,
     val attachments: List<ChatAttachment> = emptyList(),
+    val deliveryStatus: DeliveryStatus = DeliveryStatus.UNKNOWN,
 )
 
 data class ChatAttachment(
@@ -33,6 +36,7 @@ data class Conversation(
     val messages: List<ChatMessage>,
     /** Inbox summaries avoid loading every message merely to show the latest preview. */
     val previewText: String? = null,
+    val recipients: List<String> = emptyList(),
 ) {
     val preview: String get() = previewText ?: messages.lastOrNull()?.text.orEmpty()
 }

@@ -14,7 +14,7 @@ import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.tooling.preview.PreviewParameterProvider
 import com.unifiedmessages.app.data.SampleConversationRepository
 import com.unifiedmessages.app.ui.components.AppBackdrop
-import com.unifiedmessages.app.ui.components.AppPreviewOnlyPanel
+import com.unifiedmessages.app.ui.components.AppMessagePanel
 import com.unifiedmessages.app.ui.components.overlayScrimColor
 import com.unifiedmessages.app.ui.theme.AppearanceSettings
 import com.unifiedmessages.app.ui.theme.Brightness
@@ -74,7 +74,6 @@ private fun InboxAppearancePreview(
             onConversationSelected = {},
             onPinToggle = { _, _ -> },
             onNewMessage = {},
-            canStartNewMessage = false,
             onSettings = {},
             selectedId = null,
             modifier = Modifier.fillMaxSize(),
@@ -93,7 +92,7 @@ private fun ConversationAppearancePreview(
             searchQuery = "",
             onSearchQueryChange = {},
             canSend = false,
-            onSend = { _, complete -> complete(true) },
+            onSend = { _, _, complete -> complete(true) },
             onBack = {},
             showBack = true,
             modifier = Modifier.fillMaxSize(),
@@ -130,7 +129,7 @@ private fun DialogAppearancePreview(
             modifier = Modifier.fillMaxSize().background(overlayScrimColor()),
             contentAlignment = Alignment.Center,
         ) {
-            AppPreviewOnlyPanel(
+            AppMessagePanel(
                 onDismissRequest = {},
                 title = "SMS unavailable",
                 message = "Set UnifiedMessages as your default SMS app to start a conversation.",

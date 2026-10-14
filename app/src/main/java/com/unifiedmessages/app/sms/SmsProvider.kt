@@ -7,6 +7,9 @@ import android.net.Uri
 import android.provider.Telephony
 import android.telephony.PhoneNumberUtils
 import androidx.core.content.ContextCompat
+import com.unifiedmessages.app.data.local.ContentType
+import com.unifiedmessages.app.data.local.DeliveryStatus
+import com.unifiedmessages.app.data.local.MessageDirection
 import com.unifiedmessages.app.data.local.ParticipantEntity
 import com.unifiedmessages.app.data.local.ProviderIds
 import com.unifiedmessages.app.data.local.ThreadEntity
@@ -110,5 +113,35 @@ class SmsProvider @Inject constructor(
         check(isReady()) { "SMS access is not ready." }
         require(!text.isNullOrBlank() || attachments.isNotEmpty()) { "Message is empty." }
         mmsTransport.send(threadId, text, attachments)
+    }
+
+    /** A retry creates a new carrier attempt while retaining the failed message for history. */
+    suspend fun retryFailedMessage(messageId: String) {
+        check(isReady()) { "SMS access is not ready." }
+        val messageDao = database.messageDao()
+        val message = messageDao.getMessage(messageId) ?: error("Message no longer exists.")
+        require(message.direction == MessageDirection.OUTGOING &&
+            message.deliveryStatus == DeliveryStatus.FAILED && !message.isDeleted) {
+            "Only failed outgoing messages can be retried."
+        }
+        val thread = database.threadDao().getThread(message.threadId) ?: error("Conversation no longer exists.")
+        require(thread.providerId == id) { "This is not an SMS/MMS conversation." }
+
+        if (message.providerMessageId.startsWith("mms:")) {
+            val savedAttachments = messageDao.getAttachments(message.id)
+            val attachmentUris = savedAttachments.map { attachment ->
+                val uri = attachment.contentUri?.takeIf(String::isNotBlank)
+                    ?: error("A saved MMS attachment is unavailable for retry.")
+                Uri.parse(uri)
+            }
+            require(message.contentType != ContentType.MEDIA || attachmentUris.isNotEmpty()) {
+                "The failed MMS has no saved media to retry."
+            }
+            mmsTransport.send(thread.id, message.body, attachmentUris)
+        } else {
+            require(message.contentType == ContentType.TEXT) { "The failed SMS cannot be retried as text." }
+            smsTransport.send(thread.id, message.body?.takeIf(String::isNotBlank)
+                ?: error("The failed SMS has no text to retry."))
+        }
     }
 }

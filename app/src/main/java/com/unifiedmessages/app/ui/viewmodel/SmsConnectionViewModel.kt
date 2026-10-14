@@ -96,6 +96,18 @@ class SmsConnectionViewModel @Inject constructor(
         }
     }
 
+    fun retryFailedMessage(messageId: String) {
+        viewModelScope.launch {
+            try {
+                provider.retryFailedMessage(messageId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                showError(error)
+            }
+        }
+    }
+
     fun clearError() {
         mutableState.value = mutableState.value.copy(error = null)
     }

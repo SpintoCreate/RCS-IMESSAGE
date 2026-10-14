@@ -65,7 +65,7 @@ fun AppDropdownMenu(
 
 /** The opaque panel and explicit scrim keep text readable in both glass palettes. */
 @Composable
-fun AppPreviewOnlyDialog(
+fun AppMessageDialog(
     onDismissRequest: () -> Unit,
     title: String,
     message: String,
@@ -84,7 +84,7 @@ fun AppPreviewOnlyDialog(
                     onClick = onDismissRequest,
                 ),
             )
-            AppPreviewOnlyPanel(
+            AppMessagePanel(
                 onDismissRequest = onDismissRequest,
                 title = title,
                 message = message,
@@ -100,7 +100,7 @@ fun AppPreviewOnlyDialog(
 
 /** The same panel can be inspected in Compose Preview without a separate Dialog window. */
 @Composable
-fun AppPreviewOnlyPanel(
+fun AppMessagePanel(
     onDismissRequest: () -> Unit,
     title: String,
     message: String,

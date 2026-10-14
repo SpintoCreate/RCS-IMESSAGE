@@ -28,7 +28,6 @@ import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -42,17 +41,28 @@ class MessagingRepository @Inject constructor(
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun observeInbox(query: String, source: MessageSource?): Flow<List<Conversation>> =
         deletedMessagePreferences.showSenderDeletedMessages.flatMapLatest { showSenderDeleted ->
-            database.threadDao().observeThreads(query.trim(), source?.name, showSenderDeleted)
-                .map { rows -> rows.map { it.toInboxConversation(showSenderDeleted) } }
+            combine(
+                database.threadDao().observeThreads(query.trim(), source?.name, showSenderDeleted),
+                database.threadDao().observeRemoteParticipants(),
+            ) { rows, participants ->
+                val recipientsByThread = participants.groupBy { it.threadId }
+                rows.map { row ->
+                    row.toInboxConversation(
+                        showSenderDeleted,
+                        recipientsByThread[row.thread.id].orEmpty().map { it.address },
+                    )
+                }
+            }
         }
 
     fun observeConversation(threadId: String, query: String = ""): Flow<Conversation?> = combine(
         database.threadDao().observeThread(threadId),
         database.messageDao().observeMessagesMatching(threadId, query.trim()),
         database.messageDao().observeAttachments(threadId),
+        database.threadDao().observeParticipants(threadId),
         deletedMessagePreferences.showSenderDeletedMessages,
-    ) { thread, messages, attachments, showSenderDeleted ->
-        thread?.toConversation(messages, attachments, showSenderDeleted)
+    ) { thread, messages, attachments, participants, showSenderDeleted ->
+        thread?.toConversation(messages, attachments, participants.map { it.address }, showSenderDeleted)
     }
 
     fun observeUnreadCount(threadId: String): Flow<Int> =
@@ -78,7 +88,10 @@ class MessagingRepository @Inject constructor(
     suspend fun setPinned(threadId: String, pinned: Boolean) =
         database.threadDao().setPinned(threadId, pinned)
 
-    private fun ThreadSummary.toInboxConversation(showSenderDeleted: Boolean): Conversation =
+    private fun ThreadSummary.toInboxConversation(
+        showSenderDeleted: Boolean,
+        recipients: List<String>,
+    ): Conversation =
         Conversation(
             id = thread.id,
             title = thread.title,
@@ -88,6 +101,7 @@ class MessagingRepository @Inject constructor(
             unreadCount = unreadCount,
             isPinned = thread.isPinned,
             messages = emptyList(),
+            recipients = recipients,
             previewText = if (lastIsDeleted) {
                 if (lastDeletedBySender && showSenderDeleted) "Deleted by sender" else ""
             } else {
@@ -98,6 +112,7 @@ class MessagingRepository @Inject constructor(
     private fun ThreadEntity.toConversation(
         messages: List<MessageEntity>,
         attachments: List<AttachmentEntity>,
+        recipients: List<String>,
         showSenderDeleted: Boolean,
     ): Conversation {
         val visible = messages.filter { !it.isDeleted || it.deletedBySender && showSenderDeleted }
@@ -126,8 +141,10 @@ class MessagingRepository @Inject constructor(
                     time = formatMessageTimestamp(message.timestamp, message.deliveryStatus, message.direction),
                     isMine = message.direction == MessageDirection.OUTGOING,
                     attachments = messageAttachments.map { ChatAttachment(it.contentUri.orEmpty(), it.mimeType, it.fileName) },
+                    deliveryStatus = message.deliveryStatus,
                 )
             },
+            recipients = recipients,
         )
     }
 }

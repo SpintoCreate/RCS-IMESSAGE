@@ -60,10 +60,10 @@ import com.unifiedmessages.app.model.MessageSource
 import com.unifiedmessages.app.ui.components.AppCard
 import com.unifiedmessages.app.ui.components.AppDropdownMenu
 import com.unifiedmessages.app.ui.components.AppFab
-import com.unifiedmessages.app.ui.components.AppPreviewOnlyDialog
 import com.unifiedmessages.app.ui.components.AppSurface
 import com.unifiedmessages.app.ui.components.AppTopBar
 import com.unifiedmessages.app.ui.components.ContactAvatar
+import com.unifiedmessages.app.ui.components.SmsAccessBanner
 import com.unifiedmessages.app.ui.components.SourceBadge
 import com.unifiedmessages.app.ui.components.overlayScrimColor
 import com.unifiedmessages.app.ui.theme.LocalAppTheme
@@ -79,7 +79,8 @@ fun InboxScreen(
     onConversationSelected: (String) -> Unit,
     onPinToggle: (String, Boolean) -> Unit,
     onNewMessage: () -> Unit,
-    canStartNewMessage: Boolean,
+    smsAccessBanner: String? = null,
+    onRequestSmsAccess: () -> Unit = {},
     onSettings: () -> Unit,
     selectedId: String?,
     modifier: Modifier = Modifier,
@@ -87,7 +88,6 @@ fun InboxScreen(
     val theme = LocalAppTheme.current
     var settingsMenuOpen by rememberSaveable { mutableStateOf(false) }
     var sourceMenuOpen by rememberSaveable { mutableStateOf(false) }
-    var showNewMessageInfo by rememberSaveable { mutableStateOf(false) }
     val pinned = conversations.filter { it.isPinned }
     val other = conversations.filterNot { it.isPinned }
     val listState = rememberLazyListState()
@@ -170,6 +170,10 @@ fun InboxScreen(
                 }
             }
 
+            if (smsAccessBanner != null) {
+                SmsAccessBanner(smsAccessBanner, onRequestSmsAccess)
+            }
+
             Column(
                 Modifier.background(
                     Brush.verticalGradient(
@@ -239,7 +243,7 @@ fun InboxScreen(
                             )
                         }
                         AppDropdownMenu(expanded = sourceMenuOpen, onDismissRequest = { sourceMenuOpen = false }) {
-                            val sourceOptions = listOf<MessageSource?>(null, MessageSource.SMS, MessageSource.RCS, MessageSource.IMESSAGE)
+                            val sourceOptions = listOf<MessageSource?>(null, MessageSource.SMS)
                             sourceOptions.forEach { option ->
                                 DropdownMenuItem(
                                     text = { Text(option?.label ?: "All sources") },
@@ -256,7 +260,7 @@ fun InboxScreen(
         }
 
         AppFab(
-            onClick = { if (canStartNewMessage) onNewMessage() else showNewMessageInfo = true },
+            onClick = onNewMessage,
             contentDescription = "New message",
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 22.dp, bottom = 22.dp).size(58.dp),
             shape = CircleShape,
@@ -284,13 +288,6 @@ fun InboxScreen(
         }
     }
 
-    if (showNewMessageInfo) {
-        AppPreviewOnlyDialog(
-            onDismissRequest = { showNewMessageInfo = false },
-            title = "SMS unavailable",
-            message = "Set UnifiedMessages as your default SMS app to start a conversation.",
-        )
-    }
 }
 
 @Composable
@@ -382,8 +379,10 @@ private fun ConversationRow(
             }
             Spacer(Modifier.height(5.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                SourceBadge(conversation.source.label)
-                Spacer(Modifier.width(6.dp))
+                if (conversation.source == MessageSource.SMS) {
+                    SourceBadge(conversation.source.label)
+                    Spacer(Modifier.width(6.dp))
+                }
                 Text(
                     text = conversation.preview,
                     style = MaterialTheme.typography.bodySmall,

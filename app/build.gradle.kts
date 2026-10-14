@@ -65,6 +65,7 @@ dependencies {
     implementation("dev.chrisbanes.haze:haze:1.6.10")
     // PDU encoding/persistence only; platform SmsManager handles MMS transfer and callbacks.
     implementation("com.klinkerapps:android-smsmms:5.2.6")
+    implementation("com.googlecode.libphonenumber:libphonenumber:8.13.55")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
 }

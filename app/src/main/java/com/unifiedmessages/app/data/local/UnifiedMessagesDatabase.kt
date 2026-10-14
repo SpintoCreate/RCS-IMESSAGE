@@ -91,6 +91,12 @@ interface ThreadDao {
 
     @Query("SELECT * FROM participants WHERE threadId = :threadId AND isSelf = 0 ORDER BY address")
     suspend fun getParticipants(threadId: String): List<ParticipantEntity>
+
+    @Query("SELECT * FROM participants WHERE threadId = :threadId AND isSelf = 0 ORDER BY address")
+    fun observeParticipants(threadId: String): Flow<List<ParticipantEntity>>
+
+    @Query("SELECT * FROM participants WHERE isSelf = 0 ORDER BY threadId, address")
+    fun observeRemoteParticipants(): Flow<List<ParticipantEntity>>
 }
 
 @Dao
@@ -132,6 +138,9 @@ interface MessageDao {
 
     @Query("SELECT a.* FROM attachments a JOIN messages m ON m.id = a.messageId WHERE m.threadId = :threadId")
     fun observeAttachments(threadId: String): Flow<List<AttachmentEntity>>
+
+    @Query("SELECT * FROM attachments WHERE messageId = :messageId ORDER BY id")
+    suspend fun getAttachments(messageId: String): List<AttachmentEntity>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertReaction(reaction: ReactionEntity): Long
