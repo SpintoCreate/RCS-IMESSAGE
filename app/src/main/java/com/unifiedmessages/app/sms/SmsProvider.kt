@@ -48,19 +48,29 @@ class SmsProvider @Inject constructor(
 
     fun isDefaultSmsApp(): Boolean = Telephony.Sms.getDefaultSmsPackage(context) == context.packageName
 
-    fun hasSmsPermissions(): Boolean = listOf(
+    private val smsPermissions = listOf(
         Manifest.permission.READ_SMS,
         Manifest.permission.SEND_SMS,
         Manifest.permission.RECEIVE_SMS,
+    )
+    private val mmsPermissions = listOf(
         Manifest.permission.RECEIVE_MMS,
         Manifest.permission.RECEIVE_WAP_PUSH,
-    ).all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
+    )
+
+    fun hasSmsPermissions(): Boolean = smsPermissions.all {
+        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+    }
+
+    fun hasMmsPermissions(): Boolean = mmsPermissions.all {
+        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+    }
 
     fun isReady(): Boolean = isDefaultSmsApp() && hasSmsPermissions()
 
     override fun connectionIssue(): String? = when {
         !isDefaultSmsApp() -> "Set UnifiedMessages as your default SMS app to send."
-        !hasSmsPermissions() -> "Allow SMS permissions to send."
+        !hasSmsPermissions() -> "Allow SMS access to send and receive messages."
         else -> null
     }
 

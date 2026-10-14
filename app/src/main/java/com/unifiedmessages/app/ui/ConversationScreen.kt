@@ -117,7 +117,13 @@ fun ConversationScreen(
         sendPending = true
         onSend(submitted, submittedAttachments) { accepted ->
             sendPending = false
-            if (accepted && draft.trim() == submitted) draft = ""
+            if (accepted) {
+                if (draft.trim() == submitted) draft = ""
+                if (searchQuery.isNotBlank()) {
+                    onSearchQueryChange("")
+                    searchOpen = false
+                }
+            }
         }
     }
     LaunchedEffect(autoFocusComposer, conversation.id) {
@@ -282,7 +288,8 @@ fun ConversationScreen(
         ) {
             Column {
                 Text(
-                    text = sendAvailability.disabledReason
+                    text = if (sendPending) "Sending message…"
+                    else sendAvailability.disabledReason
                         ?: if (attachments.isNotEmpty() && sendAvailability.routeLabel == "SMS") "MMS"
                         else sendAvailability.routeLabel,
                     style = MaterialTheme.typography.labelSmall,

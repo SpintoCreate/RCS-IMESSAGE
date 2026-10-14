@@ -207,7 +207,8 @@ fun UnifiedMessagesApp(
     val region = remember(context) { PhoneNumbers.deviceRegion(context) }
     val smsAccessBanner = when {
         !smsState.isDefaultApp -> "Set UnifiedMessages as your default SMS app to send and receive."
-        !smsState.ready -> "Grant SMS and MMS permissions to send and receive."
+        !smsState.ready -> "Allow SMS access to send and receive messages."
+        !smsState.mmsReady -> "Allow MMS access to receive picture messages."
         else -> null
     }
     val sendFromThread: (String, String, List<Uri>, (Boolean) -> Unit) -> Unit = { threadId, text, files, complete ->
@@ -270,12 +271,13 @@ fun UnifiedMessagesApp(
                                     photoUri = contact.photoUri,
                                 )
                             },
-                            hasSmsRole = smsState.ready,
+                            hasSmsAccess = smsState.ready,
+                            smsAccessReason = smsAccessBanner ?: "Allow SMS and MMS access to send and receive messages.",
                             onRequestSmsRole = requestSmsAccess,
                             onSend = { recipients, body, attachments, complete ->
                                 if (!smsState.ready) {
                                     requestSmsAccess()
-                                    complete(null, "Set UnifiedMessages as your default SMS app and grant SMS permissions.")
+                                    complete(null, smsAccessBanner ?: "Allow SMS and MMS access to send and receive messages.")
                                 } else {
                                     smsConnectionViewModel.startThread(recipients, region) { threadId, error ->
                                         if (threadId == null) {

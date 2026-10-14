@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 data class SmsConnectionUiState(
     val isDefaultApp: Boolean = false,
     val ready: Boolean = false,
+    val mmsReady: Boolean = false,
     val importing: Boolean = false,
     val error: String? = null,
 )
@@ -30,7 +31,8 @@ class SmsConnectionViewModel @Inject constructor(
     fun refresh() {
         val defaultApp = provider.isDefaultSmsApp()
         val ready = provider.isReady()
-        mutableState.value = mutableState.value.copy(isDefaultApp = defaultApp, ready = ready)
+        val mmsReady = ready && provider.hasMmsPermissions()
+        mutableState.value = mutableState.value.copy(isDefaultApp = defaultApp, ready = ready, mmsReady = mmsReady)
         if (!ready) {
             importJob?.cancel()
             importJob = null

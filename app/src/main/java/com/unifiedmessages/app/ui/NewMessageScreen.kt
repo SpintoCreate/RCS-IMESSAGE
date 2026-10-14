@@ -79,7 +79,8 @@ data class NewMessageContact(
 fun NewMessageScreen(
     region: String,
     contacts: List<NewMessageContact>,
-    hasSmsRole: Boolean,
+    hasSmsAccess: Boolean,
+    smsAccessReason: String = "Allow SMS access to send and receive messages.",
     onRequestSmsRole: () -> Unit,
     onSend: (List<String>, String, List<Uri>, (threadId: String?, error: String?) -> Unit) -> Unit,
     onBack: () -> Unit,
@@ -142,7 +143,7 @@ fun NewMessageScreen(
 
     fun send() {
         if (sendPending || recipients.isEmpty() || (draft.isBlank() && attachments.isEmpty())) return
-        if (!hasSmsRole) return
+        if (!hasSmsAccess) return
         keyboard?.hide()
         sendPending = true
         sendError = null
@@ -166,9 +167,9 @@ fun NewMessageScreen(
             }
         }
 
-        if (!hasSmsRole) {
+        if (!hasSmsAccess) {
             SmsAccessBanner(
-                "Set UnifiedMessages as your default SMS app and allow SMS access to send.",
+                smsAccessReason,
                 onRequestSmsRole,
             )
         }
@@ -325,7 +326,8 @@ fun NewMessageScreen(
             ) {
                 Column {
                     Text(
-                        if (!hasSmsRole) "Set UnifiedMessages as your default SMS app to send."
+                        if (sendPending) "Sending message…"
+                        else if (!hasSmsAccess) smsAccessReason
                         else if (recipients.size > 1 || attachments.isNotEmpty()) "MMS" else "SMS",
                         style = MaterialTheme.typography.labelSmall,
                         color = palette.onSurfaceVariant,
@@ -408,10 +410,10 @@ fun NewMessageScreen(
                         AppFab(
                             modifier = Modifier.size(52.dp),
                             shape = CircleShape,
-                            onClick = if (hasSmsRole && !sendPending &&
+                            onClick = if (hasSmsAccess && !sendPending &&
                                 (draft.isNotBlank() || attachments.isNotEmpty())) ::send else null,
                             contentDescription = when {
-                                !hasSmsRole -> "Set UnifiedMessages as your default SMS app to send"
+                                !hasSmsAccess -> smsAccessReason
                                 draft.isBlank() && attachments.isEmpty() -> "Voice notes are not available yet"
                                 else -> "Send message"
                             },
