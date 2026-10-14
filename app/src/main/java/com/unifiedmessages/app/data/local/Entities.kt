@@ -33,6 +33,56 @@ data class ThreadEntity(
     val avatarText: String,
     val isPinned: Boolean = false,
     val updatedAt: Long = 0L,
+    /** The owning login. Legacy SMS rows are backfilled to sms:local by migration. */
+    val accountId: String? = null,
+    /** The visible network is independent of the provider transport. */
+    val networkType: String? = null,
+)
+
+@Entity(tableName = "provider_accounts", indices = [Index("providerId")])
+data class ProviderAccountEntity(
+    @PrimaryKey val id: String,
+    val providerId: String,
+    val remoteSelfId: String?,
+    val connectionState: String,
+    /** Android Keystore-backed storage owns the secret; this is only its lookup key. */
+    val credentialRef: String?,
+    val homeserver: String? = null,
+)
+
+@Entity(
+    tableName = "remote_id_mappings",
+    indices = [Index(value = ["accountId", "entityType", "remoteId"], unique = true), Index("localId")],
+)
+data class RemoteIdMappingEntity(
+    @PrimaryKey val id: String,
+    val accountId: String,
+    val entityType: String,
+    val remoteId: String,
+    val localId: String,
+)
+
+@Entity(tableName = "sync_cursors", indices = [Index("accountId")])
+data class SyncCursorEntity(
+    @PrimaryKey val id: String,
+    val accountId: String,
+    val remoteRoomId: String?,
+    val cursor: String,
+    val updatedAt: Long,
+)
+
+/** Unresolved relation events wait here until their target message is backfilled. */
+@Entity(tableName = "pending_provider_events", indices = [Index("accountId"), Index("targetMessageId")])
+data class PendingProviderEventEntity(
+    @PrimaryKey val id: String,
+    val accountId: String,
+    val providerId: String,
+    val eventId: String,
+    val targetMessageId: String,
+    val remoteMessageId: String,
+    val eventType: String,
+    val payload: String,
+    val occurredAt: Long,
 )
 
 @Entity(

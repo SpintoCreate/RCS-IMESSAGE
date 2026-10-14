@@ -41,7 +41,12 @@ interface SendRouteLookup {
 private class RoomSendRouteLookup(private val database: UnifiedMessagesDatabase) : SendRouteLookup {
     override suspend fun forThread(threadId: String): MessageRoute? =
         database.threadDao().getThread(threadId)?.let { thread ->
-            MessageRoute(thread.id, "${thread.providerId}:local", thread.providerId, NetworkType.fromSource(thread.source))
+            MessageRoute(
+                thread.id,
+                thread.accountId ?: "${thread.providerId}:local",
+                thread.providerId,
+                NetworkType.fromSource(thread.networkType ?: thread.source),
+            )
         }
 
     override suspend fun forMessage(messageId: String): MessageRoute? =

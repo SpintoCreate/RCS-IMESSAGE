@@ -203,9 +203,9 @@ class MessagingRepository @Inject constructor(
 
 private fun ThreadEntity.toMessageRoute(): MessageRoute = MessageRoute(
     threadId = id,
-    accountId = "$providerId:local",
+    accountId = accountId ?: "$providerId:local",
     providerId = providerId,
-    networkType = NetworkType.fromSource(source),
+    networkType = NetworkType.fromSource(networkType ?: source),
 )
 
 private fun initialsFor(name: String): String = name.trim()

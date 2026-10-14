@@ -12,7 +12,10 @@ import com.unifiedmessages.app.provider.ProviderThread
 import com.unifiedmessages.app.provider.ReactionAdded
 import com.unifiedmessages.app.provider.ReactionRemoved
 import java.io.ByteArrayOutputStream
+import java.io.ByteArrayInputStream
+import java.io.DataInputStream
 import java.io.DataOutputStream
+import java.util.Base64
 import java.util.UUID
 
 /** Provider-local IDs become stable app IDs without collisions across transports or entity kinds. */
@@ -55,6 +58,9 @@ interface MessageEventStore {
     suspend fun updateReaction(reaction: ReactionEntity)
     suspend fun insertEdit(edit: MessageEditEntity)
     suspend fun insertDeletion(deletion: MessageDeletionEntity)
+    suspend fun pendingForTarget(targetMessageId: String): List<PendingProviderEventEntity>
+    suspend fun insertPending(event: PendingProviderEventEntity)
+    suspend fun deletePending(id: String)
 }
 
 class RoomMessageEventStore(private val database: UnifiedMessagesDatabase) : MessageEventStore {
@@ -81,6 +87,12 @@ class RoomMessageEventStore(private val database: UnifiedMessagesDatabase) : Mes
     override suspend fun updateReaction(reaction: ReactionEntity) { messages.updateReaction(reaction) }
     override suspend fun insertEdit(edit: MessageEditEntity) { messages.insertEdit(edit) }
     override suspend fun insertDeletion(deletion: MessageDeletionEntity) { messages.insertDeletion(deletion) }
+    override suspend fun pendingForTarget(targetMessageId: String): List<PendingProviderEventEntity> =
+        database.providerSyncDao().pendingForTarget(targetMessageId)
+    override suspend fun insertPending(event: PendingProviderEventEntity) {
+        database.providerSyncDao().insertPending(event)
+    }
+    override suspend fun deletePending(id: String) { database.providerSyncDao().deletePending(id) }
 }
 
 /** Applies each provider event atomically. Unknown targets remain retryable (the event is not acknowledged). */
@@ -178,8 +190,48 @@ class MessageEventReducer(private val store: MessageEventStore) {
             store.recordEvent(
                 AppliedProviderEventEntity(eventKey, event.providerId, event.eventId, event.occurredAt),
             )
+            if (event is MessageReceived || event is MessageSent || event is ReactionAdded) {
+                val targetId = when (event) {
+                    is MessageReceived -> ProviderIds.message(event.providerId, event.message.providerMessageId)
+                    is MessageSent -> ProviderIds.message(event.providerId, event.message.providerMessageId)
+                    is ReactionAdded -> ProviderIds.message(event.providerId, event.providerMessageId)
+                    else -> error("unreachable")
+                }
+                replayPending(targetId)
+            }
+        } else {
+            PendingEventCodec.encode(event)?.let { encoded ->
+                store.insertPending(
+                    PendingProviderEventEntity(
+                        id = eventKey,
+                        accountId = "${event.providerId}:local",
+                        providerId = event.providerId,
+                        eventId = event.eventId,
+                        targetMessageId = ProviderIds.message(event.providerId, encoded.first),
+                        remoteMessageId = encoded.first,
+                        eventType = encoded.second,
+                        payload = encoded.third,
+                        occurredAt = event.occurredAt,
+                    ),
+                )
+            }
         }
         applied
+    }
+
+    private suspend fun replayPending(targetId: String) {
+        // A reaction removal can arrive before both its target message and the reaction add.
+        // Repeat until one pass makes no progress, leaving genuinely unresolved events durable.
+        while (true) {
+            var progressed = false
+            store.pendingForTarget(targetId).forEach { pending ->
+                if (apply(PendingEventCodec.decode(pending))) {
+                    store.deletePending(pending.id)
+                    progressed = true
+                }
+            }
+            if (!progressed) return
+        }
     }
 
     private suspend fun upsertMessage(
@@ -203,6 +255,8 @@ class MessageEventReducer(private val store: MessageEventStore) {
                     title = thread.title,
                     avatarText = thread.avatarText,
                     updatedAt = message.timestamp,
+                    accountId = "$providerId:local",
+                    networkType = thread.source.uppercase(),
                 ),
             )
         } else {
@@ -210,6 +264,7 @@ class MessageEventReducer(private val store: MessageEventStore) {
             store.updateThread(
                 previousThread.copy(
                     source = if (newest) thread.source else previousThread.source,
+                    networkType = if (newest) thread.source.uppercase() else previousThread.networkType,
                     title = if (newest) thread.title else previousThread.title,
                     avatarText = if (newest) thread.avatarText else previousThread.avatarText,
                     updatedAt = maxOf(previousThread.updatedAt, message.timestamp),
@@ -299,4 +354,67 @@ private fun DeliveryStatus.progressRank(): Int = when (this) {
     DeliveryStatus.SENT -> 2
     DeliveryStatus.FAILED, DeliveryStatus.RECEIVED -> 3
     DeliveryStatus.DELIVERED -> 4
+}
+
+/** Binary length-prefixed fields avoid delimiter or Unicode corruption in queued relations. */
+private object PendingEventCodec {
+    fun encode(event: MessageEvent): Triple<String, String, String>? {
+        val target = when (event) {
+            is ReactionAdded -> event.providerMessageId
+            is ReactionRemoved -> event.providerMessageId
+            is MessageEdited -> event.providerMessageId
+            is MessageDeleted -> event.providerMessageId
+            else -> return null
+        }
+        val bytes = ByteArrayOutputStream().also { buffer ->
+            DataOutputStream(buffer).use { out ->
+                when (event) {
+                    is ReactionAdded -> {
+                        out.writeUTF(event.reactionId)
+                        out.writeUTF(event.actorAddress)
+                        out.writeUTF(event.emoji)
+                    }
+                    is ReactionRemoved -> out.writeUTF(event.reactionId)
+                    is MessageEdited -> {
+                        out.writeBoolean(event.newBody != null)
+                        if (event.newBody != null) out.writeUTF(event.newBody)
+                    }
+                    is MessageDeleted -> out.writeBoolean(event.bySender)
+                    else -> Unit
+                }
+            }
+        }.toByteArray()
+        val type = when (event) {
+            is ReactionAdded -> "ReactionAdded"
+            is ReactionRemoved -> "ReactionRemoved"
+            is MessageEdited -> "MessageEdited"
+            is MessageDeleted -> "MessageDeleted"
+            else -> error("Unsupported pending event")
+        }
+        return Triple(target, type, Base64.getEncoder().encodeToString(bytes))
+    }
+
+    fun decode(pending: PendingProviderEventEntity): MessageEvent {
+        val remoteId = pending.remoteMessageId
+        val payload = Base64.getDecoder().decode(pending.payload)
+        return DataInputStream(ByteArrayInputStream(payload)).use { input ->
+            when (pending.eventType) {
+                "ReactionAdded" -> com.unifiedmessages.app.provider.ReactionAdded(
+                    pending.providerId, pending.eventId, pending.occurredAt,
+                    remoteId, input.readUTF(), input.readUTF(), input.readUTF(),
+                )
+                "ReactionRemoved" -> com.unifiedmessages.app.provider.ReactionRemoved(
+                    pending.providerId, pending.eventId, pending.occurredAt, remoteId, input.readUTF(),
+                )
+                "MessageEdited" -> MessageEdited(
+                    pending.providerId, pending.eventId, pending.occurredAt, remoteId,
+                    if (input.readBoolean()) input.readUTF() else null,
+                )
+                "MessageDeleted" -> MessageDeleted(
+                    pending.providerId, pending.eventId, pending.occurredAt, remoteId, input.readBoolean(),
+                )
+                else -> error("Unknown pending event type: ${pending.eventType}")
+            }
+        }
+    }
 }

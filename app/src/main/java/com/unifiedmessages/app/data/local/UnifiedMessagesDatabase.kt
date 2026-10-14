@@ -204,6 +204,42 @@ interface AppliedProviderEventDao {
     suspend fun insert(event: AppliedProviderEventEntity): Long
 }
 
+@Dao
+interface ProviderAccountDao {
+    @Query("SELECT * FROM provider_accounts WHERE id = :id LIMIT 1")
+    suspend fun get(id: String): ProviderAccountEntity?
+
+    @Query("SELECT * FROM provider_accounts WHERE providerId = :providerId ORDER BY id")
+    fun observe(providerId: String): Flow<List<ProviderAccountEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(account: ProviderAccountEntity)
+}
+
+@Dao
+interface ProviderSyncDao {
+    @Query("SELECT * FROM remote_id_mappings WHERE accountId = :accountId AND entityType = :entityType AND remoteId = :remoteId LIMIT 1")
+    suspend fun mapping(accountId: String, entityType: String, remoteId: String): RemoteIdMappingEntity?
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMapping(mapping: RemoteIdMappingEntity): Long
+
+    @Query("SELECT * FROM sync_cursors WHERE id = :id LIMIT 1")
+    suspend fun cursor(id: String): SyncCursorEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertCursor(cursor: SyncCursorEntity)
+
+    @Query("SELECT * FROM pending_provider_events WHERE targetMessageId = :targetMessageId ORDER BY occurredAt, id")
+    suspend fun pendingForTarget(targetMessageId: String): List<PendingProviderEventEntity>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertPending(event: PendingProviderEventEntity): Long
+
+    @Query("DELETE FROM pending_provider_events WHERE id = :id")
+    suspend fun deletePending(id: String)
+}
+
 @Database(
     entities = [
         ThreadEntity::class,
@@ -215,9 +251,13 @@ interface AppliedProviderEventDao {
         MessageDeletionEntity::class,
         AppliedProviderEventEntity::class,
         ContactEntity::class,
+        ProviderAccountEntity::class,
+        RemoteIdMappingEntity::class,
+        SyncCursorEntity::class,
+        PendingProviderEventEntity::class,
     ],
-    version = 2,
-    exportSchema = false,
+    version = 3,
+    exportSchema = true,
 )
 @TypeConverters(MessageTypeConverters::class)
 abstract class UnifiedMessagesDatabase : RoomDatabase() {
@@ -225,4 +265,6 @@ abstract class UnifiedMessagesDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
     abstract fun appliedProviderEventDao(): AppliedProviderEventDao
     abstract fun contactsDao(): ContactsDao
+    abstract fun providerAccountDao(): ProviderAccountDao
+    abstract fun providerSyncDao(): ProviderSyncDao
 }

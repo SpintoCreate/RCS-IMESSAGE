@@ -119,6 +119,8 @@ class SmsProvider @Inject constructor(
                     title = ordered.joinToString(", "),
                     avatarText = ordered.first().takeLast(2),
                     updatedAt = System.currentTimeMillis(),
+                    accountId = "sms:local",
+                    networkType = if (ordered.size > 1) "MMS" else "SMS",
                 ),
             )
         }

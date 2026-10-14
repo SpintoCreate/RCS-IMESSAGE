@@ -110,16 +110,38 @@ class MessageEventReducerTest {
         assertEquals(null, store.reactions.values.single { it.messageId == ProviderIds.message(providerId, "sms:43") }.removedAt)
     }
 
-    @Test fun eventWithMissingTargetCanBeRetriedAfterMessageArrives() = runBlocking {
+    @Test fun eventWithMissingTargetReplaysAfterMessageArrives() = runBlocking {
         val store = InMemoryMessageEventStore()
         val reducer = MessageEventReducer(store)
         val edit = MessageEdited(providerId, "edit-early", 90L, "sms:42", "Changed")
 
         assertFalse(reducer.apply(edit))
         assertTrue(store.events.isEmpty())
+        assertEquals(1, store.pending.size)
         reducer.apply(MessageReceived(providerId, "receive", 100L, thread, message))
-        assertTrue(reducer.apply(edit))
+        assertTrue(store.pending.isEmpty())
+        assertFalse(reducer.apply(edit))
         assertEquals("Changed", store.messages.values.single().body)
+    }
+
+    @Test fun queuedReactionRemovalReplaysAfterReactionAndTargetArrive() = runBlocking {
+        val store = InMemoryMessageEventStore()
+        val reducer = MessageEventReducer(store)
+        assertFalse(reducer.apply(ReactionRemoved(providerId, "remove-early", 120L, "sms:42", "tapback")))
+        assertFalse(reducer.apply(ReactionAdded(providerId, "add-early", 110L, "sms:42", "tapback", "Alex", "👍")))
+        reducer.apply(MessageReceived(providerId, "receive", 100L, thread, message))
+        assertTrue(store.pending.isEmpty())
+        assertEquals(120L, store.reactions.values.single().removedAt)
+    }
+
+    @Test fun queuedSenderDeleteRetainsOriginalBody() = runBlocking {
+        val store = InMemoryMessageEventStore()
+        val reducer = MessageEventReducer(store)
+        assertFalse(reducer.apply(MessageDeleted(providerId, "delete-early", 120L, "sms:42", true)))
+        reducer.apply(MessageReceived(providerId, "receive", 100L, thread, message))
+        assertTrue(store.pending.isEmpty())
+        assertEquals("Hello", store.messages.values.single().body)
+        assertTrue(store.messages.values.single().deletedBySender)
     }
 
     @Test fun outgoingMediaRetainsAttachmentsAndDeliveryUpdates() = runBlocking {
@@ -231,6 +253,7 @@ private class InMemoryMessageEventStore : MessageEventStore {
     val reactions = linkedMapOf<String, ReactionEntity>()
     val edits = mutableListOf<MessageEditEntity>()
     val deletions = mutableListOf<MessageDeletionEntity>()
+    val pending = linkedMapOf<String, PendingProviderEventEntity>()
 
     override suspend fun <T> transaction(block: suspend () -> T): T = block()
     override suspend fun hasEvent(id: String): Boolean = events.containsKey(id)
@@ -251,4 +274,8 @@ private class InMemoryMessageEventStore : MessageEventStore {
     override suspend fun updateReaction(reaction: ReactionEntity) { reactions[reaction.id] = reaction }
     override suspend fun insertEdit(edit: MessageEditEntity) { edits.add(edit) }
     override suspend fun insertDeletion(deletion: MessageDeletionEntity) { deletions.add(deletion) }
+    override suspend fun pendingForTarget(targetMessageId: String): List<PendingProviderEventEntity> =
+        pending.values.filter { it.targetMessageId == targetMessageId }.sortedWith(compareBy({ it.occurredAt }, { it.id }))
+    override suspend fun insertPending(event: PendingProviderEventEntity) { pending.putIfAbsent(event.id, event) }
+    override suspend fun deletePending(id: String) { pending.remove(id) }
 }
