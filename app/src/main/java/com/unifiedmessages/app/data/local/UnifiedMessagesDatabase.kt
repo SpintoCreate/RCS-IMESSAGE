@@ -195,8 +195,9 @@ interface AppliedProviderEventDao {
         MessageEditEntity::class,
         MessageDeletionEntity::class,
         AppliedProviderEventEntity::class,
+        ContactEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 @TypeConverters(MessageTypeConverters::class)
@@ -204,4 +205,5 @@ abstract class UnifiedMessagesDatabase : RoomDatabase() {
     abstract fun threadDao(): ThreadDao
     abstract fun messageDao(): MessageDao
     abstract fun appliedProviderEventDao(): AppliedProviderEventDao
+    abstract fun contactsDao(): ContactsDao
 }

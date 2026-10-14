@@ -1,6 +1,10 @@
 package com.unifiedmessages.app.ui.components
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -15,20 +19,28 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.unifiedmessages.app.ui.theme.LocalAppTheme
 import com.unifiedmessages.app.ui.theme.SurfaceStyle
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** Kept for existing callers while screens move to the semantic AppCard wrapper. */
 @Composable
@@ -96,13 +108,29 @@ private val avatarSwatches = listOf(
     Color(0xFF30435E) to Color(0xFF5B718D),
 )
 
-/** Fictional initials on a stable abstract gradient; no contact photo permission is needed. */
+/** A cached contact thumbnail, falling back to the existing initials gradient. */
 @Composable
 fun ContactAvatar(
     text: String,
     modifier: Modifier = Modifier,
     size: Dp = 48.dp,
+    photoUri: String? = null,
 ) {
+    val context = LocalContext.current
+    val photo by produceState<Bitmap?>(initialValue = null, key1 = photoUri) {
+        value = if (photoUri.isNullOrBlank()) null else withContext(Dispatchers.IO) {
+            try {
+                context.contentResolver.openInputStream(Uri.parse(photoUri))?.use { stream ->
+                    BitmapFactory.decodeStream(stream)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // A contact may be deleted or the permission revoked while the list is open.
+                null
+            }
+        }
+    }
     val initials = text.trim().uppercase().take(3).ifEmpty { "?" }
     val (start, end) = avatarSwatches[Math.floorMod(initials.hashCode(), avatarSwatches.size)]
     Box(
@@ -110,27 +138,38 @@ fun ContactAvatar(
             .size(size)
             .clip(CircleShape)
             .background(Brush.linearGradient(listOf(start, end)))
-            .clearAndSetSemantics { contentDescription = "Avatar with initials $initials" },
+            .clearAndSetSemantics {
+                contentDescription = if (photo == null) "Avatar with initials $initials" else "Contact photo"
+            },
         contentAlignment = Alignment.Center,
     ) {
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .size(size * 0.63f)
-                .background(Color.White.copy(alpha = 0.12f), CircleShape),
-        )
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .size(size * 0.28f)
-                .background(Color.Black.copy(alpha = 0.08f), CircleShape),
-        )
-        Text(
-            text = initials,
-            color = Color.White,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
+        if (photo != null) {
+            Image(
+                bitmap = checkNotNull(photo).asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize(),
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(size * 0.63f)
+                    .background(Color.White.copy(alpha = 0.12f), CircleShape),
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .size(size * 0.28f)
+                    .background(Color.Black.copy(alpha = 0.08f), CircleShape),
+            )
+            Text(
+                text = initials,
+                color = Color.White,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
     }
 }
 

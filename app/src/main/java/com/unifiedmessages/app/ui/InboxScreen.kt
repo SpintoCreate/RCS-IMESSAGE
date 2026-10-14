@@ -356,7 +356,7 @@ private fun ConversationRow(
             )
             .padding(horizontal = 11.dp, vertical = 12.dp),
     ) {
-        ContactAvatar(text = conversation.avatarText, size = 44.dp)
+        ContactAvatar(text = conversation.avatarText, size = 44.dp, photoUri = conversation.photoUri)
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

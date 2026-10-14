@@ -7,7 +7,6 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.provider.Telephony
-import java.util.Locale
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.edit
@@ -60,6 +59,7 @@ import com.unifiedmessages.app.ui.theme.LocalAppTheme
 import com.unifiedmessages.app.ui.theme.SurfaceStyle
 import com.unifiedmessages.app.ui.theme.UnifiedMessagesTheme
 import com.unifiedmessages.app.ui.viewmodel.ConversationViewModel
+import com.unifiedmessages.app.ui.viewmodel.ContactsViewModel
 import com.unifiedmessages.app.ui.viewmodel.InboxViewModel
 import com.unifiedmessages.app.ui.viewmodel.SmsConnectionViewModel
 import com.unifiedmessages.app.model.MessageSource
@@ -90,9 +90,12 @@ fun UnifiedMessagesApp(
     val inboxViewModel: InboxViewModel = hiltViewModel()
     val conversationViewModel: ConversationViewModel = hiltViewModel()
     val smsConnectionViewModel: SmsConnectionViewModel = hiltViewModel()
+    val contactsViewModel: ContactsViewModel = hiltViewModel()
     val inboxState by inboxViewModel.uiState.collectAsState()
     val conversationState by conversationViewModel.uiState.collectAsState()
     val smsState by smsConnectionViewModel.uiState.collectAsState()
+    val contacts by contactsViewModel.contacts.collectAsState()
+    val hasContactsPermission by contactsViewModel.hasPermission.collectAsState()
     val deletedMessagePreferences = remember(context) {
         EntryPointAccessors.fromApplication(
             context.applicationContext,
@@ -115,10 +118,11 @@ fun UnifiedMessagesApp(
         mutableStateOf(preferences.getBoolean("welcome_seen_v2", false))
     }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var focusComposerId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedAttachments by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var newMessageOpen by rememberSaveable { mutableStateOf(false) }
-    val welcomeAlreadySeenOnLaunch = remember { welcomeSeen }
+    var newMessageInitialRecipients by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
     val smsPermissions = remember {
         arrayOf(
             Manifest.permission.READ_SMS,
@@ -132,6 +136,9 @@ fun UnifiedMessagesApp(
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { smsConnectionViewModel.refresh() }
+    val contactsPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { contactsViewModel.refresh() }
     val mediaPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments(),
     ) { picked ->
@@ -159,26 +166,35 @@ fun UnifiedMessagesApp(
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) smsConnectionViewModel.refresh()
+            if (event == Lifecycle.Event.ON_RESUME) {
+                smsConnectionViewModel.refresh()
+                contactsViewModel.refresh()
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(Unit) { smsConnectionViewModel.refresh() }
-    LaunchedEffect(sharedAttachments, requestedRecipient) {
-        if (welcomeAlreadySeenOnLaunch && (sharedAttachments.isNotEmpty() || requestedRecipient != null)) {
-            requestSmsAccess()
+    LaunchedEffect(sharedAttachments, welcomeSeen) {
+        if (sharedAttachments.isNotEmpty() && welcomeSeen) {
+            selectedAttachments = (selectedAttachments + sharedAttachments).distinct()
+            onShareHandled()
+            newMessageOpen = true
         }
     }
-    LaunchedEffect(sharedAttachments, welcomeSeen, smsState.ready) {
-        if (sharedAttachments.isNotEmpty() && welcomeSeen && smsState.ready) newMessageOpen = true
-    }
-    LaunchedEffect(requestedRecipient, welcomeSeen, smsState.ready) {
-        if (requestedRecipient != null && welcomeSeen && smsState.ready) {
+    LaunchedEffect(requestedRecipient, welcomeSeen) {
+        if (requestedRecipient != null && welcomeSeen) {
+            newMessageInitialRecipients = listOf(requestedRecipient)
+            newMessageOpen = true
             onRecipientHandled()
-            smsConnectionViewModel.startThread(requestedRecipient) { id ->
-                if (id != null) selectedId = id
-            }
+        }
+    }
+    LaunchedEffect(newMessageOpen, hasContactsPermission) {
+        if (newMessageOpen && !hasContactsPermission &&
+            !preferences.getBoolean("contacts_permission_requested_v1", false)
+        ) {
+            preferences.edit { putBoolean("contacts_permission_requested_v1", true) }
+            contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
         }
     }
     LaunchedEffect(selectedId) { conversationViewModel.selectThread(selectedId) }
@@ -187,7 +203,7 @@ fun UnifiedMessagesApp(
         conversationState.conversation?.takeIf { it.id == id }
             ?: inboxState.conversations.firstOrNull { it.id == id }
     }
-    val region = remember { Locale.getDefault().country.ifBlank { "US" } }
+    val region = remember(context) { PhoneNumbers.deviceRegion(context) }
     val smsAccessBanner = when {
         !smsState.isDefaultApp -> "Set UnifiedMessages as your default SMS app to send and receive."
         !smsState.ready -> "Grant SMS and MMS permissions to send and receive."
@@ -209,8 +225,19 @@ fun UnifiedMessagesApp(
         }
     }
 
-    BackHandler(enabled = settingsOpen || selectedId != null) {
-        if (settingsOpen) settingsOpen = false else selectedId = null
+    BackHandler(enabled = newMessageOpen || settingsOpen || selectedId != null) {
+        when {
+            newMessageOpen -> {
+                newMessageOpen = false
+                newMessageInitialRecipients = emptyList()
+                selectedAttachments = emptyList()
+            }
+            settingsOpen -> settingsOpen = false
+            else -> {
+                selectedId = null
+                focusComposerId = null
+            }
+        }
     }
 
     UnifiedMessagesTheme(settings = appearance) {
@@ -236,6 +263,54 @@ fun UnifiedMessagesApp(
                                 welcomeSeen = true
                                 preferences.edit { putBoolean("welcome_seen_v2", true) }
                                 requestSmsAccess()
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else if (newMessageOpen) {
+                        NewMessageScreen(
+                            region = region,
+                            contacts = contacts.map { contact ->
+                                NewMessageContact(
+                                    name = contact.displayName,
+                                    e164Number = contact.normalizedNumber,
+                                    photoUri = contact.photoUri,
+                                )
+                            },
+                            hasSmsRole = smsState.ready,
+                            onRequestSmsRole = requestSmsAccess,
+                            onSend = { recipients, body, attachments, complete ->
+                                if (!smsState.ready) {
+                                    requestSmsAccess()
+                                    complete(null, "Set UnifiedMessages as your default SMS app and grant SMS permissions.")
+                                } else {
+                                    smsConnectionViewModel.sendNewMessage(
+                                        recipients, region, body, attachments,
+                                    ) { threadId, error ->
+                                        complete(threadId, error)
+                                        if (threadId != null) {
+                                            newMessageOpen = false
+                                            newMessageInitialRecipients = emptyList()
+                                            selectedAttachments = emptyList()
+                                            selectedId = threadId
+                                            focusComposerId = threadId
+                                        }
+                                    }
+                                }
+                            },
+                            onBack = {
+                                newMessageOpen = false
+                                newMessageInitialRecipients = emptyList()
+                                selectedAttachments = emptyList()
+                            },
+                            initialRecipients = newMessageInitialRecipients,
+                            attachments = selectedAttachments,
+                            onAttach = { mediaPicker.launch(arrayOf("image/*", "video/*", "audio/*")) },
+                            onRemoveAttachment = { file ->
+                                selectedAttachments = selectedAttachments - file
+                            },
+                            contactsEnabled = hasContactsPermission,
+                            onRequestContacts = {
+                                contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
                             },
                             modifier = Modifier.fillMaxSize(),
                         )
@@ -305,7 +380,8 @@ fun UnifiedMessagesApp(
                                 onConversationSelected = { selectedId = it },
                                 onPinToggle = inboxViewModel::setPinned,
                                 onNewMessage = {
-                                    if (smsState.ready) newMessageOpen = true else requestSmsAccess()
+                                    newMessageInitialRecipients = emptyList()
+                                    newMessageOpen = true
                                 },
                                 smsAccessBanner = smsAccessBanner,
                                 onRequestSmsAccess = requestSmsAccess,
@@ -339,6 +415,8 @@ fun UnifiedMessagesApp(
                                         onRequestSmsAccess = requestSmsAccess,
                                         onBack = { selectedId = null },
                                         showBack = false,
+                                        autoFocusComposer = focusComposerId == selected.id,
+                                        onComposerFocused = { focusComposerId = null },
                                         modifier = Modifier.fillMaxSize(),
                                     )
                                 }
@@ -362,7 +440,8 @@ fun UnifiedMessagesApp(
                                     onConversationSelected = { selectedId = it },
                                     onPinToggle = inboxViewModel::setPinned,
                                     onNewMessage = {
-                                        if (smsState.ready) newMessageOpen = true else requestSmsAccess()
+                                        newMessageInitialRecipients = emptyList()
+                                        newMessageOpen = true
                                     },
                                     smsAccessBanner = smsAccessBanner,
                                     onRequestSmsAccess = requestSmsAccess,
@@ -390,6 +469,8 @@ fun UnifiedMessagesApp(
                                     onRequestSmsAccess = requestSmsAccess,
                                     onBack = { selectedId = null },
                                     showBack = true,
+                                    autoFocusComposer = focusComposerId == conversation.id,
+                                    onComposerFocused = { focusComposerId = null },
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             } else {
@@ -398,35 +479,6 @@ fun UnifiedMessagesApp(
                         }
                     }
                 }
-            }
-            if (newMessageOpen) {
-                NewMessageDialog(
-                    onDismiss = {
-                        newMessageOpen = false
-                        if (sharedAttachments.isNotEmpty()) onShareHandled()
-                    },
-                    onCreate = { address, complete ->
-                        smsConnectionViewModel.startThread(address) { threadId ->
-                            if (threadId == null) {
-                                complete(false)
-                            } else if (sharedAttachments.isNotEmpty()) {
-                                smsConnectionViewModel.sendMms(threadId, null, sharedAttachments) { accepted ->
-                                    complete(accepted)
-                                    if (accepted) {
-                                        selectedId = threadId
-                                        newMessageOpen = false
-                                        onShareHandled()
-                                    }
-                                }
-                            } else {
-                                complete(true)
-                                selectedId = threadId
-                                newMessageOpen = false
-                            }
-                        }
-                    },
-                    attachmentCount = sharedAttachments.size,
-                )
             }
             smsState.error?.let { error ->
                 AppMessageDialog(

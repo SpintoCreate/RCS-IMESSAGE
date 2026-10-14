@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Telephony
-import android.telephony.PhoneNumberUtils
 import androidx.core.content.ContextCompat
 import com.unifiedmessages.app.data.local.ContentType
 import com.unifiedmessages.app.data.local.DeliveryStatus
@@ -23,6 +22,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
 /** Android's default SMS app role is required before this transport can send or import messages. */
@@ -62,35 +62,52 @@ class SmsProvider @Inject constructor(
         importer.importAll()
     }
 
-    /** Creates a system thread and a matching empty Room thread so the existing composer can open. */
-    suspend fun startThread(address: String): String = withContext(Dispatchers.IO) {
+    suspend fun startThread(address: String): String =
+        startThread(listOf(address), PhoneNumbers.deviceRegion(context))
+
+    /** Reuses an exact participant set or creates a matching Android and Room thread. */
+    suspend fun startThread(recipients: List<String>, region: String): String = withContext(Dispatchers.IO) {
         check(isReady()) { "SMS access is not ready." }
-        val normalized = PhoneNumberUtils.stripSeparators(address.trim())
-        require(normalized.isNotBlank()) { "Enter a phone number." }
-        val systemThreadId = Telephony.Threads.getOrCreateThreadId(context, normalized).toString()
-        val id = ProviderIds.thread(this@SmsProvider.id, systemThreadId)
         val dao = database.threadDao()
-        if (dao.getThread(id) == null) {
+        val candidates = dao.observeThreads(source = "SMS").first()
+            .filter { it.thread.providerId == id }
+            .map { summary ->
+                ThreadRecipients.Candidate(
+                    summary.thread.id,
+                    dao.getParticipants(summary.thread.id).map { it.address },
+                )
+            }
+        val resolution = ThreadRecipients.resolve(recipients, region, candidates)
+        resolution.existingThreadId?.let { return@withContext it }
+
+        val systemThreadId = Telephony.Threads.getOrCreateThreadId(
+            context, resolution.normalizedRecipients,
+        ).toString()
+        val threadId = ProviderIds.thread(id, systemThreadId)
+        val ordered = resolution.normalizedRecipients.sorted()
+        if (dao.getThread(threadId) == null) {
             dao.insert(
                 ThreadEntity(
-                    id = id,
+                    id = threadId,
                     providerId = this@SmsProvider.id,
                     providerThreadId = systemThreadId,
-                    source = "SMS",
-                    title = normalized,
-                    avatarText = normalized.takeLast(2),
+                    source = if (ordered.size > 1) "MMS" else "SMS",
+                    title = ordered.joinToString(", "),
+                    avatarText = ordered.first().takeLast(2),
                     updatedAt = System.currentTimeMillis(),
                 ),
             )
         }
-        dao.insertParticipant(
-            ParticipantEntity(
-                id = ProviderIds.participant(this@SmsProvider.id, systemThreadId, normalized),
-                threadId = id,
-                address = normalized,
-            ),
-        )
-        id
+        ordered.forEach { address ->
+            dao.insertParticipant(
+                ParticipantEntity(
+                    id = ProviderIds.participant(this@SmsProvider.id, systemThreadId, address),
+                    threadId = threadId,
+                    address = address,
+                ),
+            )
+        }
+        threadId
     }
 
     suspend fun sendText(threadId: String, text: String) {

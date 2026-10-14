@@ -16,6 +16,7 @@ import com.unifiedmessages.app.model.ChatMessage
 import com.unifiedmessages.app.model.ChatAttachment
 import com.unifiedmessages.app.model.Conversation
 import com.unifiedmessages.app.model.MessageSource
+import com.unifiedmessages.app.sms.PhoneNumbers
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.Instant
 import java.time.LocalDate
@@ -37,33 +38,41 @@ class MessagingRepository @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val database: UnifiedMessagesDatabase,
     private val deletedMessagePreferences: DeletedMessagePreferences,
+    private val contactsRepository: ContactsRepository,
 ) {
+    private val deviceRegion = PhoneNumbers.deviceRegion(context)
+
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun observeInbox(query: String, source: MessageSource?): Flow<List<Conversation>> =
         deletedMessagePreferences.showSenderDeletedMessages.flatMapLatest { showSenderDeleted ->
             combine(
                 database.threadDao().observeThreads(query.trim(), source?.name, showSenderDeleted),
                 database.threadDao().observeRemoteParticipants(),
-            ) { rows, participants ->
+                contactsRepository.contacts,
+            ) { rows, participants, contacts ->
                 val recipientsByThread = participants.groupBy { it.threadId }
+                val contactsByNumber = contacts.associateBy { it.normalizedNumber }
                 rows.map { row ->
                     row.toInboxConversation(
                         showSenderDeleted,
                         recipientsByThread[row.thread.id].orEmpty().map { it.address },
-                    )
+                    ).withContacts(contactsByNumber)
                 }
             }
         }
 
-    fun observeConversation(threadId: String, query: String = ""): Flow<Conversation?> = combine(
-        database.threadDao().observeThread(threadId),
-        database.messageDao().observeMessagesMatching(threadId, query.trim()),
-        database.messageDao().observeAttachments(threadId),
-        database.threadDao().observeParticipants(threadId),
-        deletedMessagePreferences.showSenderDeletedMessages,
-    ) { thread, messages, attachments, participants, showSenderDeleted ->
-        thread?.toConversation(messages, attachments, participants.map { it.address }, showSenderDeleted)
-    }
+    fun observeConversation(threadId: String, query: String = ""): Flow<Conversation?> =
+        combine(
+            database.threadDao().observeThread(threadId),
+            database.messageDao().observeMessagesMatching(threadId, query.trim()),
+            database.messageDao().observeAttachments(threadId),
+            database.threadDao().observeParticipants(threadId),
+            deletedMessagePreferences.showSenderDeletedMessages,
+        ) { thread, messages, attachments, participants, showSenderDeleted ->
+            thread?.toConversation(messages, attachments, participants.map { it.address }, showSenderDeleted)
+        }.combine(contactsRepository.contacts) { conversation, contacts ->
+            conversation?.withContacts(contacts.associateBy { it.normalizedNumber })
+        }
 
     fun observeUnreadCount(threadId: String): Flow<Int> =
         database.threadDao().observeUnreadCount(threadId)
@@ -87,6 +96,27 @@ class MessagingRepository @Inject constructor(
 
     suspend fun setPinned(threadId: String, pinned: Boolean) =
         database.threadDao().setPinned(threadId, pinned)
+
+    private fun Conversation.withContacts(contactsByNumber: Map<String, CachedContact>): Conversation {
+        if (recipients.isEmpty()) return this
+        val matches = recipients.map { address ->
+            PhoneNumbers.normalizeToE164(address, deviceRegion)?.let(contactsByNumber::get)
+        }
+        if (matches.none { it != null }) return this
+        if (recipients.size == 1) {
+            val contact = matches.firstOrNull() ?: return this
+            return copy(
+                title = contact.displayName,
+                avatarText = initialsFor(contact.displayName),
+                photoUri = contact.photoUri,
+            )
+        }
+        val names = recipients.mapIndexed { index, address -> matches[index]?.displayName ?: address }
+        return copy(
+            title = names.joinToString(", "),
+            avatarText = names.take(2).joinToString("") { initialsFor(it).take(1) },
+        )
+    }
 
     private fun ThreadSummary.toInboxConversation(
         showSenderDeleted: Boolean,
@@ -148,6 +178,13 @@ class MessagingRepository @Inject constructor(
         )
     }
 }
+
+private fun initialsFor(name: String): String = name.trim()
+    .split(Regex("\\s+"))
+    .filter(String::isNotBlank)
+    .take(2)
+    .joinToString("") { it.first().uppercase() }
+    .ifBlank { "?" }
 
 private fun String.toDisplaySource(): MessageSource = when (uppercase(Locale.ROOT)) {
     "IMESSAGE" -> MessageSource.IMESSAGE

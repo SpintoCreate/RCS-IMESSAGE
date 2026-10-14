@@ -37,6 +37,8 @@ data class Conversation(
     /** Inbox summaries avoid loading every message merely to show the latest preview. */
     val previewText: String? = null,
     val recipients: List<String> = emptyList(),
+    /** Cached contact thumbnail, when this is a one-to-one conversation. */
+    val photoUri: String? = null,
 ) {
     val preview: String get() = previewText ?: messages.lastOrNull()?.text.orEmpty()
 }

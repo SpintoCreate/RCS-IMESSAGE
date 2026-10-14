@@ -68,6 +68,41 @@ class SmsConnectionViewModel @Inject constructor(
         }
     }
 
+    /** Recipient-screen errors stay inline so the address chips and unsent draft remain visible. */
+    fun startThread(recipients: List<String>, region: String, onComplete: (String?, String?) -> Unit) {
+        viewModelScope.launch {
+            try {
+                onComplete(provider.startThread(recipients, region), null)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                onComplete(null, error.message ?: "Could not start this conversation. Try again.")
+            }
+        }
+    }
+
+    fun sendNewMessage(
+        recipients: List<String>,
+        region: String,
+        body: String,
+        attachments: List<Uri>,
+        onComplete: (String?, String?) -> Unit,
+    ) {
+        viewModelScope.launch {
+            try {
+                require(body.isNotBlank() || attachments.isNotEmpty()) { "Write a message or add an attachment." }
+                val threadId = provider.startThread(recipients, region)
+                if (attachments.isNotEmpty()) provider.sendMms(threadId, body.ifBlank { null }, attachments)
+                else provider.sendThreadText(threadId, body)
+                onComplete(threadId, null)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                onComplete(null, error.message ?: "Could not send this message. Try again.")
+            }
+        }
+    }
+
     fun sendText(threadId: String, text: String, onComplete: (Boolean) -> Unit) {
         viewModelScope.launch {
             try {

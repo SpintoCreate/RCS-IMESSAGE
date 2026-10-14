@@ -14,6 +14,7 @@ class PhoneNumbersTest {
 
     @Test fun internationalNumbersDoNotDependOnTheDeviceRegion() {
         assertEquals("+442079460018", PhoneNumbers.normalizeToE164("+44 20 7946 0018", "US"))
+        assertTrue(PhoneNumbers.formatForDisplay("(555) 123-4567", "US")!!.startsWith("+1 "))
     }
 
     @Test fun shortCodesAndAlphanumericSendersCannotReceiveReplies() {

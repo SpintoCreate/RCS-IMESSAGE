@@ -38,6 +38,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -48,6 +49,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -83,12 +86,21 @@ fun ConversationScreen(
     onRequestSmsAccess: () -> Unit = {},
     onBack: () -> Unit,
     showBack: Boolean,
+    autoFocusComposer: Boolean = false,
+    onComposerFocused: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val palette = LocalAppTheme.current
     var draft by rememberSaveable(conversation.id) { mutableStateOf("") }
     var sendPending by remember(conversation.id) { mutableStateOf(false) }
     var searchOpen by rememberSaveable(conversation.id) { mutableStateOf(false) }
+    val composerFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(autoFocusComposer, conversation.id) {
+        if (autoFocusComposer && canSend) {
+            composerFocusRequester.requestFocus()
+            onComposerFocused()
+        }
+    }
     val visibleMessages = conversation.messages
 
     val screenModifier = if (palette.style == SurfaceStyle.SOLID) {
@@ -167,7 +179,7 @@ fun ConversationScreen(
                     modifier = Modifier.align(Alignment.Center).padding(horizontal = 48.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    ContactAvatar(text = conversation.avatarText, size = 42.dp)
+                    ContactAvatar(text = conversation.avatarText, size = 42.dp, photoUri = conversation.photoUri)
                     Spacer(Modifier.height(5.dp))
                     Text(
                         text = conversation.title,
@@ -270,7 +282,7 @@ fun ConversationScreen(
                         TextField(
                             value = draft,
                             onValueChange = { draft = it },
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().focusRequester(composerFocusRequester),
                             enabled = canSend,
                             placeholder = { Text(if (canSend) "Message" else "This sender can't receive replies") },
                             trailingIcon = {
