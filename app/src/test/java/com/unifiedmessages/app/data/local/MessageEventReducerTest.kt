@@ -157,6 +157,32 @@ class MessageEventReducerTest {
         assertEquals(4, store.events.size)
     }
 
+    @Test fun outgoingSendMovesFromSendingToSentAndDelivered() = runBlocking {
+        val store = InMemoryMessageEventStore()
+        val reducer = MessageEventReducer(store)
+        reducer.apply(MessageSent(providerId, "queued", 100L, thread,
+            message.copy(deliveryStatus = DeliveryStatus.PENDING)))
+        assertEquals(DeliveryStatus.PENDING, store.messages.values.single().deliveryStatus)
+
+        reducer.apply(DeliveryUpdated(providerId, "sent", 110L, "sms:42", DeliveryStatus.SENT))
+        assertEquals(DeliveryStatus.SENT, store.messages.values.single().deliveryStatus)
+        reducer.apply(DeliveryUpdated(providerId, "delivered", 120L, "sms:42", DeliveryStatus.DELIVERED))
+        assertEquals(DeliveryStatus.DELIVERED, store.messages.values.single().deliveryStatus)
+    }
+
+    @Test fun failedCarrierCallbackKeepsOriginalMessageForRetry() = runBlocking {
+        val store = InMemoryMessageEventStore()
+        val reducer = MessageEventReducer(store)
+        reducer.apply(MessageSent(providerId, "queued", 100L, thread,
+            message.copy(deliveryStatus = DeliveryStatus.PENDING)))
+        reducer.apply(DeliveryUpdated(providerId, "failed", 110L, "sms:42", DeliveryStatus.FAILED))
+
+        val failed = store.messages.values.single()
+        assertEquals(DeliveryStatus.FAILED, failed.deliveryStatus)
+        assertEquals("Hello", failed.body)
+        assertFalse(failed.isDeleted)
+    }
+
     @Test fun olderMmsImportCannotReplaceNewerSmsThreadMetadata() = runBlocking {
         val store = InMemoryMessageEventStore()
         val reducer = MessageEventReducer(store)

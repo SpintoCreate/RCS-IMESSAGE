@@ -21,7 +21,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -30,6 +33,7 @@ import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +52,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -55,11 +65,13 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.unifiedmessages.app.model.ChatMessage
 import com.unifiedmessages.app.model.Conversation
 import com.unifiedmessages.app.model.MessageSource
 import com.unifiedmessages.app.data.local.DeliveryStatus
+import com.unifiedmessages.app.provider.SendAvailability
 import com.unifiedmessages.app.ui.components.AppBubble
 import com.unifiedmessages.app.ui.components.AppFab
 import com.unifiedmessages.app.ui.components.AppInputBar
@@ -76,7 +88,7 @@ fun ConversationScreen(
     conversation: Conversation,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
-    canSend: Boolean,
+    sendAvailability: SendAvailability,
     onSend: (String, List<Uri>, (Boolean) -> Unit) -> Unit,
     attachments: List<Uri> = emptyList(),
     onAttach: () -> Unit = {},
@@ -91,10 +103,23 @@ fun ConversationScreen(
     modifier: Modifier = Modifier,
 ) {
     val palette = LocalAppTheme.current
+    val canSend = sendAvailability.canSend
     var draft by rememberSaveable(conversation.id) { mutableStateOf("") }
     var sendPending by remember(conversation.id) { mutableStateOf(false) }
     var searchOpen by rememberSaveable(conversation.id) { mutableStateOf(false) }
     val composerFocusRequester = remember { FocusRequester() }
+    val listState = rememberLazyListState()
+    val hasPayload = draft.isNotBlank() || attachments.isNotEmpty()
+    fun submit() {
+        if (!canSend || !hasPayload || sendPending) return
+        val submitted = draft.trim()
+        val submittedAttachments = attachments.toList()
+        sendPending = true
+        onSend(submitted, submittedAttachments) { accepted ->
+            sendPending = false
+            if (accepted && draft.trim() == submitted) draft = ""
+        }
+    }
     LaunchedEffect(autoFocusComposer, conversation.id) {
         if (autoFocusComposer && canSend) {
             composerFocusRequester.requestFocus()
@@ -102,6 +127,9 @@ fun ConversationScreen(
         }
     }
     val visibleMessages = conversation.messages
+    LaunchedEffect(conversation.id, visibleMessages.lastOrNull()?.id) {
+        if (visibleMessages.isNotEmpty()) listState.animateScrollToItem(visibleMessages.size)
+    }
 
     val screenModifier = if (palette.style == SurfaceStyle.SOLID) {
         modifier.background(palette.background)
@@ -118,6 +146,7 @@ fun ConversationScreen(
         // The measured insets keep the resting layout unchanged while bubbles scroll behind the header.
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
+            state = listState,
             contentPadding = PaddingValues(
                 start = 18.dp,
                 end = 18.dp,
@@ -253,7 +282,9 @@ fun ConversationScreen(
         ) {
             Column {
                 Text(
-                    text = if (canSend) "SMS" else "This sender can't receive replies",
+                    text = sendAvailability.disabledReason
+                        ?: if (attachments.isNotEmpty() && sendAvailability.routeLabel == "SMS") "MMS"
+                        else sendAvailability.routeLabel,
                     style = MaterialTheme.typography.labelSmall,
                     color = palette.onSurfaceVariant,
                     modifier = Modifier.padding(start = 12.dp, bottom = 8.dp),
@@ -282,9 +313,16 @@ fun ConversationScreen(
                         TextField(
                             value = draft,
                             onValueChange = { draft = it },
-                            modifier = Modifier.fillMaxWidth().focusRequester(composerFocusRequester),
+                            modifier = Modifier.fillMaxWidth().focusRequester(composerFocusRequester)
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type == KeyEventType.KeyDown && event.key == Key.Enter &&
+                                        !event.isShiftPressed && hasPayload) {
+                                        submit()
+                                        true
+                                    } else false
+                                },
                             enabled = canSend,
-                            placeholder = { Text(if (canSend) "Message" else "This sender can't receive replies") },
+                            placeholder = { Text(if (canSend) "Message" else sendAvailability.disabledReason.orEmpty()) },
                             trailingIcon = {
                                 IconButton(onClick = onAttach, enabled = canSend && !sendPending) {
                                     Icon(
@@ -296,6 +334,8 @@ fun ConversationScreen(
                             },
                             minLines = 1,
                             maxLines = 4,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                            keyboardActions = KeyboardActions(onSend = { submit() }),
                             shape = RoundedCornerShape(28.dp),
                             colors = TextFieldDefaults.colors(
                                 focusedContainerColor = Color.Transparent,
@@ -318,19 +358,15 @@ fun ConversationScreen(
                     AppFab(
                         modifier = Modifier.size(52.dp),
                         shape = CircleShape,
-                        onClick = if (canSend && (draft.isNotBlank() || attachments.isNotEmpty()) && !sendPending) ({
-                            val submitted = draft.trim()
-                            val submittedAttachments = attachments.toList()
-                            sendPending = true
-                            onSend(submitted, submittedAttachments) { accepted ->
-                                sendPending = false
-                                if (accepted && draft.trim() == submitted) draft = ""
-                            }
-                        }) else null,
-                        contentDescription = if (canSend) "Send message" else "Send unavailable",
+                        onClick = if (canSend && hasPayload && !sendPending) ::submit else null,
+                        contentDescription = when {
+                            !canSend -> sendAvailability.disabledReason ?: "Send unavailable"
+                            !hasPayload -> "Voice notes are not available yet"
+                            else -> "Send message"
+                        },
                     ) {
                         Icon(
-                            Icons.AutoMirrored.Outlined.Send,
+                            if (hasPayload) Icons.AutoMirrored.Outlined.Send else Icons.Outlined.GraphicEq,
                             contentDescription = null,
                             tint = palette.onAccent,
                             modifier = Modifier.align(Alignment.Center).size(22.dp),

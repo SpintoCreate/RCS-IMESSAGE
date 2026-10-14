@@ -26,6 +26,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -47,6 +48,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -140,10 +142,7 @@ fun NewMessageScreen(
 
     fun send() {
         if (sendPending || recipients.isEmpty() || (draft.isBlank() && attachments.isEmpty())) return
-        if (!hasSmsRole) {
-            onRequestSmsRole()
-            return
-        }
+        if (!hasSmsRole) return
         keyboard?.hide()
         sendPending = true
         sendError = null
@@ -326,7 +325,8 @@ fun NewMessageScreen(
             ) {
                 Column {
                     Text(
-                        if (recipients.size > 1 || attachments.isNotEmpty()) "MMS" else "SMS",
+                        if (!hasSmsRole) "Set UnifiedMessages as your default SMS app to send."
+                        else if (recipients.size > 1 || attachments.isNotEmpty()) "MMS" else "SMS",
                         style = MaterialTheme.typography.labelSmall,
                         color = palette.onSurfaceVariant,
                         modifier = Modifier.padding(start = 12.dp, bottom = 8.dp),
@@ -368,7 +368,14 @@ fun NewMessageScreen(
                             TextField(
                                 value = draft,
                                 onValueChange = { draft = it; sendError = null },
-                                modifier = Modifier.fillMaxWidth().focusRequester(composerFocusRequester),
+                                modifier = Modifier.fillMaxWidth().focusRequester(composerFocusRequester)
+                                    .onPreviewKeyEvent { event ->
+                                        if (event.type == KeyEventType.KeyDown && event.key == Key.Enter &&
+                                            !event.isShiftPressed && (draft.isNotBlank() || attachments.isNotEmpty())) {
+                                            send()
+                                            true
+                                        } else false
+                                    },
                                 placeholder = { Text("Message") },
                                 trailingIcon = {
                                     IconButton(onClick = onAttach, enabled = !sendPending) {
@@ -381,6 +388,8 @@ fun NewMessageScreen(
                                 },
                                 minLines = 1,
                                 maxLines = 4,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                keyboardActions = KeyboardActions(onSend = { send() }),
                                 shape = RoundedCornerShape(28.dp),
                                 colors = TextFieldDefaults.colors(
                                     focusedContainerColor = Color.Transparent,
@@ -399,11 +408,17 @@ fun NewMessageScreen(
                         AppFab(
                             modifier = Modifier.size(52.dp),
                             shape = CircleShape,
-                            onClick = if (!sendPending && (draft.isNotBlank() || attachments.isNotEmpty())) ::send else null,
-                            contentDescription = if (hasSmsRole) "Send message" else "Enable SMS to send",
+                            onClick = if (hasSmsRole && !sendPending &&
+                                (draft.isNotBlank() || attachments.isNotEmpty())) ::send else null,
+                            contentDescription = when {
+                                !hasSmsRole -> "Set UnifiedMessages as your default SMS app to send"
+                                draft.isBlank() && attachments.isEmpty() -> "Voice notes are not available yet"
+                                else -> "Send message"
+                            },
                         ) {
                             Icon(
-                                Icons.AutoMirrored.Outlined.Send,
+                                if (draft.isNotBlank() || attachments.isNotEmpty()) Icons.AutoMirrored.Outlined.Send
+                                else Icons.Outlined.GraphicEq,
                                 contentDescription = null,
                                 tint = palette.onAccent,
                                 modifier = Modifier.align(Alignment.Center).size(22.dp),

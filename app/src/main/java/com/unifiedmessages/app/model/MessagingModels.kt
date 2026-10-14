@@ -1,6 +1,8 @@
 package com.unifiedmessages.app.model
 
 import com.unifiedmessages.app.data.local.DeliveryStatus
+import com.unifiedmessages.app.provider.MessageRoute
+import com.unifiedmessages.app.provider.NetworkType
 
 /** The source shown in the existing chat badges. Provider integrations map to this display value. */
 enum class MessageSource(val label: String) {
@@ -30,6 +32,7 @@ data class Conversation(
     val title: String,
     val avatarText: String,
     val source: MessageSource,
+    val route: MessageRoute = MessageRoute(id, "preview:local", "preview", NetworkType.fromSource(source.name)),
     val timestamp: String,
     val unreadCount: Int,
     val isPinned: Boolean = false,

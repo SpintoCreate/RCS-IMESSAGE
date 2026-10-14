@@ -1,6 +1,5 @@
 package com.unifiedmessages.app.ui.viewmodel
 
-import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.unifiedmessages.app.sms.SmsProvider
@@ -77,68 +76,6 @@ class SmsConnectionViewModel @Inject constructor(
                 throw cancelled
             } catch (error: Exception) {
                 onComplete(null, error.message ?: "Could not start this conversation. Try again.")
-            }
-        }
-    }
-
-    fun sendNewMessage(
-        recipients: List<String>,
-        region: String,
-        body: String,
-        attachments: List<Uri>,
-        onComplete: (String?, String?) -> Unit,
-    ) {
-        viewModelScope.launch {
-            try {
-                require(body.isNotBlank() || attachments.isNotEmpty()) { "Write a message or add an attachment." }
-                val threadId = provider.startThread(recipients, region)
-                if (attachments.isNotEmpty()) provider.sendMms(threadId, body.ifBlank { null }, attachments)
-                else provider.sendThreadText(threadId, body)
-                onComplete(threadId, null)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                onComplete(null, error.message ?: "Could not send this message. Try again.")
-            }
-        }
-    }
-
-    fun sendText(threadId: String, text: String, onComplete: (Boolean) -> Unit) {
-        viewModelScope.launch {
-            try {
-                provider.sendThreadText(threadId, text)
-                onComplete(true)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                showError(error)
-                onComplete(false)
-            }
-        }
-    }
-
-    fun sendMms(threadId: String, text: String?, attachments: List<Uri>, onComplete: (Boolean) -> Unit) {
-        viewModelScope.launch {
-            try {
-                provider.sendMms(threadId, text, attachments)
-                onComplete(true)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                showError(error)
-                onComplete(false)
-            }
-        }
-    }
-
-    fun retryFailedMessage(messageId: String) {
-        viewModelScope.launch {
-            try {
-                provider.retryFailedMessage(messageId)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                showError(error)
             }
         }
     }

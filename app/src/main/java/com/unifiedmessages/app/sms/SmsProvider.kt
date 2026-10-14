@@ -16,6 +16,7 @@ import com.unifiedmessages.app.data.local.UnifiedMessagesDatabase
 import com.unifiedmessages.app.provider.Capabilities
 import com.unifiedmessages.app.provider.MessageEvent
 import com.unifiedmessages.app.provider.MessageProvider
+import com.unifiedmessages.app.provider.SendCommandProvider
 import com.unifiedmessages.app.sms.mms.MmsTransport
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -34,7 +35,7 @@ class SmsProvider @Inject constructor(
     private val importer: TelephonyImporter,
     private val smsTransport: SmsTransport,
     private val mmsTransport: MmsTransport,
-) : MessageProvider {
+) : MessageProvider, SendCommandProvider {
     override val id: String = "sms"
     override val capabilities = Capabilities(
         supportsReactions = false, // Quoted SMS fallbacks are parsed, not native reactions.
@@ -56,6 +57,19 @@ class SmsProvider @Inject constructor(
     ).all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
 
     fun isReady(): Boolean = isDefaultSmsApp() && hasSmsPermissions()
+
+    override fun connectionIssue(): String? = when {
+        !isDefaultSmsApp() -> "Set UnifiedMessages as your default SMS app to send."
+        !hasSmsPermissions() -> "Allow SMS permissions to send."
+        else -> null
+    }
+
+    override suspend fun send(threadId: String, body: String, attachments: List<Uri>) {
+        if (attachments.isNotEmpty()) sendMms(threadId, body.ifBlank { null }, attachments)
+        else sendThreadText(threadId, body)
+    }
+
+    override suspend fun retry(messageId: String) = retryFailedMessage(messageId)
 
     suspend fun importExisting() {
         check(isReady()) { "Set UnifiedMessages as the default SMS app and grant SMS permissions first." }

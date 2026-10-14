@@ -61,9 +61,8 @@ import com.unifiedmessages.app.ui.theme.UnifiedMessagesTheme
 import com.unifiedmessages.app.ui.viewmodel.ConversationViewModel
 import com.unifiedmessages.app.ui.viewmodel.ContactsViewModel
 import com.unifiedmessages.app.ui.viewmodel.InboxViewModel
+import com.unifiedmessages.app.ui.viewmodel.MessageSendViewModel
 import com.unifiedmessages.app.ui.viewmodel.SmsConnectionViewModel
-import com.unifiedmessages.app.model.MessageSource
-import com.unifiedmessages.app.model.Conversation
 import com.unifiedmessages.app.sms.PhoneNumbers
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -90,10 +89,12 @@ fun UnifiedMessagesApp(
     val inboxViewModel: InboxViewModel = hiltViewModel()
     val conversationViewModel: ConversationViewModel = hiltViewModel()
     val smsConnectionViewModel: SmsConnectionViewModel = hiltViewModel()
+    val messageSendViewModel: MessageSendViewModel = hiltViewModel()
     val contactsViewModel: ContactsViewModel = hiltViewModel()
     val inboxState by inboxViewModel.uiState.collectAsState()
     val conversationState by conversationViewModel.uiState.collectAsState()
     val smsState by smsConnectionViewModel.uiState.collectAsState()
+    val sendError by messageSendViewModel.error.collectAsState()
     val contacts by contactsViewModel.contacts.collectAsState()
     val hasContactsPermission by contactsViewModel.hasPermission.collectAsState()
     val deletedMessagePreferences = remember(context) {
@@ -210,18 +211,11 @@ fun UnifiedMessagesApp(
         else -> null
     }
     val sendFromThread: (String, String, List<Uri>, (Boolean) -> Unit) -> Unit = { threadId, text, files, complete ->
-        if (!smsState.ready) {
-            requestSmsAccess()
-            complete(false)
-        } else if (files.isNotEmpty()) {
-            smsConnectionViewModel.sendMms(threadId, text.takeIf(String::isNotBlank), files) { accepted ->
-                if (accepted && selectedId == threadId) {
-                    selectedAttachments = selectedAttachments.filterNot { it in files }
-                }
-                complete(accepted)
+        messageSendViewModel.send(threadId, text, files) { accepted, _ ->
+            if (accepted && selectedId == threadId) {
+                selectedAttachments = selectedAttachments.filterNot { it in files }
             }
-        } else {
-            smsConnectionViewModel.sendText(threadId, text, complete)
+            complete(accepted)
         }
     }
 
@@ -283,16 +277,23 @@ fun UnifiedMessagesApp(
                                     requestSmsAccess()
                                     complete(null, "Set UnifiedMessages as your default SMS app and grant SMS permissions.")
                                 } else {
-                                    smsConnectionViewModel.sendNewMessage(
-                                        recipients, region, body, attachments,
-                                    ) { threadId, error ->
-                                        complete(threadId, error)
-                                        if (threadId != null) {
-                                            newMessageOpen = false
-                                            newMessageInitialRecipients = emptyList()
-                                            selectedAttachments = emptyList()
-                                            selectedId = threadId
-                                            focusComposerId = threadId
+                                    smsConnectionViewModel.startThread(recipients, region) { threadId, error ->
+                                        if (threadId == null) {
+                                            complete(null, error)
+                                        } else {
+                                            messageSendViewModel.send(
+                                                threadId, body, attachments, showErrorDialog = false,
+                                            ) { accepted, sendFailure ->
+                                                complete(threadId.takeIf { accepted },
+                                                    sendFailure)
+                                                if (accepted) {
+                                                    newMessageOpen = false
+                                                    newMessageInitialRecipients = emptyList()
+                                                    selectedAttachments = emptyList()
+                                                    selectedId = threadId
+                                                    focusComposerId = threadId
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -401,17 +402,14 @@ fun UnifiedMessagesApp(
                                         conversation = selected,
                                         searchQuery = conversationState.searchQuery,
                                         onSearchQueryChange = conversationViewModel::setSearchQuery,
-                                        canSend = selected.canReceiveReply(region),
+                                        sendAvailability = messageSendViewModel.availability(selected, region),
                                         onSend = { text, files, complete ->
                                             sendFromThread(selected.id, text, files, complete)
                                         },
                                         attachments = selectedAttachments,
                                         onAttach = { mediaPicker.launch(arrayOf("image/*", "video/*", "audio/*")) },
                                         onRemoveAttachment = { file -> selectedAttachments = selectedAttachments - file },
-                                        onRetry = { messageId ->
-                                            if (smsState.ready) smsConnectionViewModel.retryFailedMessage(messageId)
-                                            else requestSmsAccess()
-                                        },
+                                        onRetry = messageSendViewModel::retry,
                                         smsAccessBanner = smsAccessBanner,
                                         onRequestSmsAccess = requestSmsAccess,
                                         onBack = { selectedId = null },
@@ -456,17 +454,14 @@ fun UnifiedMessagesApp(
                                     conversation = conversation,
                                     searchQuery = conversationState.searchQuery,
                                     onSearchQueryChange = conversationViewModel::setSearchQuery,
-                                    canSend = conversation.canReceiveReply(region),
+                                    sendAvailability = messageSendViewModel.availability(conversation, region),
                                     onSend = { text, files, complete ->
                                         sendFromThread(conversation.id, text, files, complete)
                                     },
                                     attachments = selectedAttachments,
                                     onAttach = { mediaPicker.launch(arrayOf("image/*", "video/*", "audio/*")) },
                                     onRemoveAttachment = { file -> selectedAttachments = selectedAttachments - file },
-                                    onRetry = { messageId ->
-                                        if (smsState.ready) smsConnectionViewModel.retryFailedMessage(messageId)
-                                        else requestSmsAccess()
-                                    },
+                                    onRetry = messageSendViewModel::retry,
                                     smsAccessBanner = smsAccessBanner,
                                     onRequestSmsAccess = requestSmsAccess,
                                     onBack = { selectedId = null },
@@ -489,13 +484,16 @@ fun UnifiedMessagesApp(
                     message = error,
                 )
             }
+            sendError?.let { error ->
+                AppMessageDialog(
+                    onDismissRequest = messageSendViewModel::clearError,
+                    title = "Messaging issue",
+                    message = error,
+                )
+            }
         }
     }
 }
-
-private fun Conversation.canReceiveReply(region: String): Boolean =
-    source == MessageSource.SMS &&
-        (recipients.ifEmpty { listOf(title) }).all { PhoneNumbers.isReplyableAddress(it, region) }
 
 @Composable
 private fun EmptyConversationHint() {

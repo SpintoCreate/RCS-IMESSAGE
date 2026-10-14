@@ -96,7 +96,9 @@ private fun ConversationAppearancePreview(
             conversation = SampleConversationRepository.conversations.first(),
             searchQuery = "",
             onSearchQueryChange = {},
-            canSend = false,
+            sendAvailability = com.unifiedmessages.app.provider.SendAvailability(
+                "SMS", "Preview conversation cannot send."
+            ),
             onSend = { _, _, complete -> complete(true) },
             onBack = {},
             showBack = true,

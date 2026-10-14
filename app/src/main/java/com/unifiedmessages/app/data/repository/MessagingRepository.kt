@@ -16,6 +16,8 @@ import com.unifiedmessages.app.model.ChatMessage
 import com.unifiedmessages.app.model.ChatAttachment
 import com.unifiedmessages.app.model.Conversation
 import com.unifiedmessages.app.model.MessageSource
+import com.unifiedmessages.app.provider.MessageRoute
+import com.unifiedmessages.app.provider.NetworkType
 import com.unifiedmessages.app.sms.PhoneNumbers
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.Instant
@@ -142,6 +144,7 @@ class MessagingRepository @Inject constructor(
     ): Conversation =
         Conversation(
             id = thread.id,
+            route = thread.toMessageRoute(),
             title = thread.title,
             avatarText = thread.avatarText,
             source = thread.source.toDisplaySource(),
@@ -167,6 +170,7 @@ class MessagingRepository @Inject constructor(
         val attachmentsByMessage = attachments.groupBy { it.messageId }
         return Conversation(
             id = id,
+            route = toMessageRoute(),
             title = title,
             avatarText = avatarText,
             source = source.toDisplaySource(),
@@ -196,6 +200,13 @@ class MessagingRepository @Inject constructor(
         )
     }
 }
+
+private fun ThreadEntity.toMessageRoute(): MessageRoute = MessageRoute(
+    threadId = id,
+    accountId = "$providerId:local",
+    providerId = providerId,
+    networkType = NetworkType.fromSource(source),
+)
 
 private fun initialsFor(name: String): String = name.trim()
     .split(Regex("\\s+"))
