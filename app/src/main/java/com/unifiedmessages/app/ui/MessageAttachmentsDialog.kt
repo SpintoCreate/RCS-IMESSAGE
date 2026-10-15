@@ -24,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,15 +35,32 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.unifiedmessages.app.model.ChatAttachment
+import com.unifiedmessages.app.matrix.MatrixMediaRef
+import com.unifiedmessages.app.matrix.MatrixProvider
 import com.unifiedmessages.app.ui.components.overlayPanelColor
 import com.unifiedmessages.app.ui.components.overlayScrimColor
 import com.unifiedmessages.app.ui.theme.LocalAppTheme
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface MatrixMediaEntryPoint { fun matrixProvider(): MatrixProvider }
 
 /** Opens imported MMS parts with an installed media viewer, without changing chat layout. */
 @Composable
 fun MessageAttachmentsDialog(attachments: List<ChatAttachment>, onDismiss: () -> Unit) {
     val theme = LocalAppTheme.current
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val matrixProvider = remember(context) {
+        EntryPointAccessors.fromApplication(context.applicationContext, MatrixMediaEntryPoint::class.java)
+            .matrixProvider()
+    }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(Modifier.fillMaxSize().background(overlayScrimColor())) {
             Box(
@@ -64,17 +82,24 @@ fun MessageAttachmentsDialog(attachments: List<ChatAttachment>, onDismiss: () ->
                     attachments.forEachIndexed { index, attachment ->
                         TextButton(
                             onClick = {
-                                try {
-                                    context.startActivity(
-                                        Intent(Intent.ACTION_VIEW)
-                                            .setDataAndType(Uri.parse(attachment.uri), attachment.mimeType)
-                                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
-                                    )
-                                    onDismiss()
-                                } catch (_: ActivityNotFoundException) {
-                                    Toast.makeText(context, "No app can open this attachment", Toast.LENGTH_SHORT).show()
-                                } catch (_: SecurityException) {
-                                    Toast.makeText(context, "This attachment is unavailable", Toast.LENGTH_SHORT).show()
+                                scope.launch {
+                                    try {
+                                        val reference = MatrixMediaRef.parse(attachment.uri)
+                                        val uri = if (reference != null) {
+                                            matrixProvider.openMedia(reference, attachment.fileName, attachment.mimeType)
+                                        } else Uri.parse(attachment.uri)
+                                        context.startActivity(
+                                            Intent(Intent.ACTION_VIEW)
+                                                .setDataAndType(uri, attachment.mimeType)
+                                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+                                        )
+                                        onDismiss()
+                                    } catch (cancelled: CancellationException) { throw cancelled }
+                                    catch (_: ActivityNotFoundException) {
+                                        Toast.makeText(context, "No app can open this attachment", Toast.LENGTH_SHORT).show()
+                                    } catch (_: Exception) {
+                                        Toast.makeText(context, "This attachment is unavailable", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             },
                             enabled = attachment.uri.isNotBlank(),

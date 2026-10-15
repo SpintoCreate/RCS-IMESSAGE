@@ -89,5 +89,13 @@
                 <data android:scheme="mmsto" />
             </intent-filter>
         </service>
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.media"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/matrix_media_paths" />
+        </provider>
     </application>
 </manifest>

@@ -3,6 +3,7 @@ package com.unifiedmessages.app.matrix
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.core.content.FileProvider
 import android.util.Base64
 import com.unifiedmessages.app.data.local.ProviderAccountEntity
 import com.unifiedmessages.app.data.local.ContentType
@@ -21,6 +22,7 @@ import com.unifiedmessages.app.provider.MessageRoute
 import com.unifiedmessages.app.provider.MessageReceived
 import com.unifiedmessages.app.provider.MessageSent
 import com.unifiedmessages.app.provider.ProviderMessage
+import com.unifiedmessages.app.provider.ProviderAttachment
 import com.unifiedmessages.app.provider.ProviderParticipant
 import com.unifiedmessages.app.provider.ProviderThread
 import com.unifiedmessages.app.provider.SendCommandProvider
@@ -63,6 +65,8 @@ import org.matrix.rustcomponents.sdk.UploadParameters
 import org.matrix.rustcomponents.sdk.UploadSource
 import org.matrix.rustcomponents.sdk.SsoHandler
 import org.matrix.rustcomponents.sdk.OAuthConfiguration
+import org.matrix.rustcomponents.sdk.MessageType
+import org.matrix.rustcomponents.sdk.MediaSource
 
 data class MatrixLoginMethods(val password: Boolean, val sso: Boolean, val oidc: Boolean)
 
@@ -294,7 +298,10 @@ class MatrixProvider @Inject constructor(
         val remoteEventId: String? = null,
         val deliveryStatus: DeliveryStatus? = null,
         val sendHandle: SendHandle? = null,
+        val media: MediaSnapshot? = null,
     )
+
+    private data class MediaSnapshot(val sourceJson: String, val filename: String, val mimeType: String)
 
     private fun snapshot(item: TimelineItem): Snapshot? {
         val event = item.asEvent() ?: return null
@@ -309,6 +316,17 @@ class MatrixProvider @Inject constructor(
         val type = if (message?.content?.msgType is org.matrix.rustcomponents.sdk.MessageType.Text) {
             ContentType.TEXT
         } else ContentType.MEDIA
+        val media = when (val msgType = message?.content?.msgType) {
+            is MessageType.Image -> MediaSnapshot(msgType.content.source.toJson(), msgType.content.filename,
+                msgType.content.info?.mimetype ?: "image/*")
+            is MessageType.Video -> MediaSnapshot(msgType.content.source.toJson(), msgType.content.filename,
+                msgType.content.info?.mimetype ?: "video/*")
+            is MessageType.Audio -> MediaSnapshot(msgType.content.source.toJson(), msgType.content.filename,
+                msgType.content.info?.mimetype ?: "audio/*")
+            is MessageType.File -> MediaSnapshot(msgType.content.source.toJson(), msgType.content.filename,
+                msgType.content.info?.mimetype ?: "application/octet-stream")
+            else -> null
+        }
         val sendState = event.localSendState
         val deliveryStatus = when (sendState) {
             is EventSendState.NotSentYet -> DeliveryStatus.PENDING
@@ -319,7 +337,8 @@ class MatrixProvider @Inject constructor(
         return Snapshot(eventId, event.sender, event.timestamp.toLong(), body, type,
             event.isOwn, message?.content?.isEdited == true, kind is MsgLikeKind.Redacted,
             transactionId, (sendState as? EventSendState.Sent)?.eventId,
-            deliveryStatus, if (transactionId != null) event.lazyProvider.getSendHandle() else null)
+            deliveryStatus, if (transactionId != null) event.lazyProvider.getSendHandle() else null,
+            media)
     }
 
     private suspend fun ingest(accountId: String, roomId: String, title: String, item: Snapshot) {
@@ -329,18 +348,20 @@ class MatrixProvider @Inject constructor(
         if (item.transactionId != null && item.sendHandle != null) {
             sendHandles.put("$accountId|${item.eventId}", item.sendHandle)?.close()
         }
-        if (existing == null) {
-            val thread = ProviderThread(roomId, "MATRIX", title,
-                participants = listOf(ProviderParticipant(item.sender, isSelf = item.isOwn)))
-            val message = ProviderMessage(item.eventId, item.body, item.contentType, item.timestamp,
-                senderAddress = if (item.isOwn) null else item.sender,
-                deliveryStatus = item.deliveryStatus ?: if (item.isOwn) DeliveryStatus.SENT else DeliveryStatus.RECEIVED)
-            val base = if (item.isOwn) MessageSent(id, "timeline:$roomId:${item.eventId}", item.timestamp,
-                thread, message, accountId)
-            else MessageReceived(id, "timeline:$roomId:${item.eventId}", item.timestamp,
-                thread, message, accountId)
-            if (reducer.apply(base)) emitted.emit(base)
-        }
+        val thread = ProviderThread(roomId, "MATRIX", title,
+            participants = listOf(ProviderParticipant(item.sender, isSelf = item.isOwn)))
+        val message = ProviderMessage(item.eventId, item.body, item.contentType, item.timestamp,
+            senderAddress = if (item.isOwn) null else item.sender,
+            deliveryStatus = item.deliveryStatus ?: if (item.isOwn) DeliveryStatus.SENT else DeliveryStatus.RECEIVED,
+            attachments = item.media?.let { media -> listOf(ProviderAttachment(
+                "media:0", MatrixMediaRef(accountId, media.sourceJson).encode(),
+                media.mimeType, media.filename,
+            )) }.orEmpty())
+        val base = if (item.isOwn) MessageSent(id, "timeline:$roomId:${item.eventId}", item.timestamp,
+            thread, message, accountId)
+        else MessageReceived(id, "timeline:$roomId:${item.eventId}", item.timestamp,
+            thread, message, accountId)
+        if (reducer.apply(base)) emitted.emit(base)
         if (item.remoteEventId != null && item.transactionId != null) {
             reducer.bindRemoteMessageId(accountId, id, item.remoteEventId, localId)
         }
@@ -422,6 +443,25 @@ class MatrixProvider @Inject constructor(
             output.toByteArray()
         }
     }
+
+    /** Downloads and decrypts through the SDK, then gives an Android viewer a temporary local URI. */
+    suspend fun openMedia(reference: MatrixMediaRef, filename: String?, mimeType: String): Uri =
+        withContext(Dispatchers.IO) {
+            val client = clients[reference.accountId] ?: error("Reconnect this Matrix account to open media.")
+            val source = MediaSource.fromJson(reference.sourceJson)
+            try {
+                val directory = File(context.cacheDir, "matrix_media").apply { mkdirs() }
+                val target = File(directory, "${UUID.randomUUID()}-${filename.orEmpty().takeLast(80).replace('/', '_')}")
+                client.getMediaFile(source, filename, mimeType, true, directory.absolutePath).use { handle ->
+                    if (!handle.persist(target.absolutePath)) {
+                        File(handle.path()).copyTo(target, overwrite = true)
+                    }
+                }
+                FileProvider.getUriForFile(context, "${context.packageName}.media", target)
+            } finally {
+                source.close()
+            }
+        }
 
     override suspend fun retry(messageId: String) {
         val message = database.messageDao().getMessage(messageId) ?: error("Message no longer exists.")
