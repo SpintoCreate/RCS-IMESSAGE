@@ -176,6 +176,9 @@ interface MessageDao {
     )
     suspend fun getLatestActiveReaction(messageId: String, actorAddress: String, emoji: String): ReactionEntity?
 
+    @Query("SELECT * FROM reactions WHERE messageId = :messageId AND removedAt IS NULL")
+    suspend fun getActiveReactions(messageId: String): List<ReactionEntity>
+
     @Update
     suspend fun updateReaction(reaction: ReactionEntity)
 

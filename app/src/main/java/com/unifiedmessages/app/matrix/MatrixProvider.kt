@@ -3,6 +3,7 @@ package com.unifiedmessages.app.matrix
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.core.content.FileProvider
 import android.util.Base64
 import com.unifiedmessages.app.data.local.ProviderAccountEntity
@@ -25,6 +26,8 @@ import com.unifiedmessages.app.provider.ProviderMessage
 import com.unifiedmessages.app.provider.ProviderAttachment
 import com.unifiedmessages.app.provider.ProviderParticipant
 import com.unifiedmessages.app.provider.ProviderThread
+import com.unifiedmessages.app.provider.ReactionAdded
+import com.unifiedmessages.app.provider.ReactionRemoved
 import com.unifiedmessages.app.provider.SendCommandProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -285,7 +288,13 @@ class MatrixProvider @Inject constructor(
                         }
                         }.mapNotNull { snapshot(it) }
                         scope.launch {
-                            snapshots.forEach { ingest(accountId, roomId, title, it) }
+                            snapshots.forEach { item ->
+                                try { ingest(accountId, roomId, title, item) }
+                                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                                catch (_: Exception) {
+                                    Log.w("MatrixProvider", "Could not import a timeline event")
+                                }
+                            }
                         }
                     }
                 })
@@ -313,6 +322,7 @@ class MatrixProvider @Inject constructor(
         val deliveryStatus: DeliveryStatus? = null,
         val sendHandle: SendHandle? = null,
         val media: MediaSnapshot? = null,
+        val reactions: List<MatrixObservedReaction> = emptyList(),
     )
 
     private data class MediaSnapshot(val sourceJson: String, val filename: String, val mimeType: String)
@@ -350,7 +360,10 @@ class MatrixProvider @Inject constructor(
             event.isOwn, message?.content?.isEdited == true, kind is MsgLikeKind.Redacted,
             transactionId, (sendState as? EventSendState.Sent)?.eventId,
             deliveryStatus, if (transactionId != null) event.lazyProvider.getSendHandle() else null,
-            media)
+            media, event.reactions.flatMap { reaction ->
+                reaction.senders.map { sender -> MatrixObservedReaction(sender.senderId, reaction.key,
+                    sender.timestamp.toLong()) }
+            })
     }
 
     private suspend fun ingest(accountId: String, roomId: String, title: String, item: Snapshot) {
@@ -381,6 +394,25 @@ class MatrixProvider @Inject constructor(
             val statusEvent = DeliveryUpdated(id, "state:$roomId:${item.eventId}:${item.deliveryStatus}",
                 System.currentTimeMillis(), item.eventId, item.deliveryStatus, accountId)
             if (reducer.apply(statusEvent)) emitted.emit(statusEvent)
+        }
+        val active = database.messageDao().getActiveReactions(localId)
+        matrixReactionChanges(active, item.reactions).forEach { change ->
+            when (change) {
+            is MatrixReactionChange.Add -> {
+                val reaction = change.observed
+                val reactionId = "${reaction.actor}:${reaction.emoji}"
+                val added = ReactionAdded(id,
+                    "reaction:add:$roomId:${item.eventId}:$reactionId:${reaction.timestamp}",
+                    reaction.timestamp, item.eventId, reactionId, reaction.actor, reaction.emoji, accountId)
+                if (reducer.apply(added)) emitted.emit(added)
+            }
+            is MatrixReactionChange.Remove -> {
+                val old = change.active
+                val removed = ReactionRemoved(id, "reaction:remove:$roomId:${old.id}",
+                    System.currentTimeMillis(), item.eventId, old.providerReactionId, accountId)
+                if (reducer.apply(removed)) emitted.emit(removed)
+            }
+            }
         }
         val event: MessageEvent = when {
             item.redacted -> MessageDeleted(id, "redacted:$roomId:${item.eventId}", item.timestamp,

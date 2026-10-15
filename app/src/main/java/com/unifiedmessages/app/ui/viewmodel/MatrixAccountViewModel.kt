@@ -43,6 +43,7 @@ class MatrixAccountViewModel @Inject constructor(
             catch (error: Exception) { showError(error) }
             while (true) {
                 val connected = state.value.accounts.filter { it.connectionState == "CONNECTED" }
+                var hadFailure = false
                 connected.forEach { account ->
                     try {
                         provider.syncOnce(account.id)
@@ -50,9 +51,9 @@ class MatrixAccountViewModel @Inject constructor(
                         mutableState.value = state.value.copy(security = state.value.security + (account.id to status))
                     }
                     catch (cancelled: CancellationException) { throw cancelled }
-                    catch (error: Exception) { showError(error) }
+                    catch (error: Exception) { hadFailure = true; showError(error) }
                 }
-                delay(if (connected.isEmpty()) 5_000 else 1_000)
+                delay(if (hadFailure) 15_000 else if (connected.isEmpty()) 5_000 else 1_000)
             }
         }
     }
