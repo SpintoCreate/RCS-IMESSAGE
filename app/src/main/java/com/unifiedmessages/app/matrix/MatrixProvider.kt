@@ -70,9 +70,14 @@ import org.matrix.rustcomponents.sdk.SsoHandler
 import org.matrix.rustcomponents.sdk.OAuthConfiguration
 import org.matrix.rustcomponents.sdk.MessageType
 import org.matrix.rustcomponents.sdk.MediaSource
+import uniffi.ruma_events.MessageLikeEventType
 
 data class MatrixLoginMethods(val password: Boolean, val sso: Boolean, val oidc: Boolean)
 data class MatrixSecurityStatus(val recovery: String, val verification: String)
+data class MatrixMessageActions(val react: Boolean = false, val edit: Boolean = false,
+    val unsend: Boolean = false, val reply: Boolean = false) {
+    val any: Boolean get() = react || edit || unsend || reply
+}
 
 /** One native Matrix client and encrypted SDK store per signed-in account. */
 @Singleton
@@ -89,8 +94,12 @@ class MatrixProvider @Inject constructor(
     private val clients = ConcurrentHashMap<String, Client>()
     private val reducer = MessageEventReducer(database)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private data class RoomTimeline(val timeline: Timeline, val listener: TaskHandle)
+    private data class RoomPermissions(val send: Boolean, val react: Boolean, val redactOwn: Boolean)
+    private data class RoomTimeline(val timeline: Timeline, val listener: TaskHandle,
+        val permissions: RoomPermissions)
     private val timelines = ConcurrentHashMap<String, RoomTimeline>()
+    private data class MessageFlags(val isOwn: Boolean, val editable: Boolean, val canReply: Boolean)
+    private val messageFlags = ConcurrentHashMap<String, MessageFlags>()
     private val sendHandles = ConcurrentHashMap<String, SendHandle>()
     private data class PendingBrowserLogin(
         val client: Client, val handler: SsoHandler?, val reference: String, val storeKey: String,
@@ -254,6 +263,7 @@ class MatrixProvider @Inject constructor(
         sendHandles.keys.filter { it.startsWith("$accountId|") }.forEach { key ->
             sendHandles.remove(key)?.close()
         }
+        messageFlags.clear()
         val client = clients.remove(accountId)
         try {
             client?.logout()
@@ -274,6 +284,16 @@ class MatrixProvider @Inject constructor(
             if (!timelines.containsKey(key)) {
                 val timeline = room.timeline()
                 val title = room.displayName() ?: roomId
+                val permissions = try {
+                    room.getPowerLevels().use { levels ->
+                        RoomPermissions(
+                            levels.canOwnUserSendMessage(MessageLikeEventType.Message) ||
+                                levels.canOwnUserSendMessage(MessageLikeEventType.Encrypted),
+                            levels.canOwnUserSendMessage(MessageLikeEventType.Reaction),
+                            levels.canOwnUserRedactOwn(),
+                        )
+                    }
+                } catch (_: Exception) { RoomPermissions(false, false, false) }
                 val listener = timeline.addListener(object : TimelineListener {
                     override fun onUpdate(diffs: List<TimelineDiff>) {
                         val snapshots = diffs.flatMap { diff ->
@@ -298,7 +318,7 @@ class MatrixProvider @Inject constructor(
                         }
                     }
                 })
-                val existing = timelines.putIfAbsent(key, RoomTimeline(timeline, listener))
+                val existing = timelines.putIfAbsent(key, RoomTimeline(timeline, listener, permissions))
                 if (existing != null) { listener.close(); timeline.close() }
             }
         }
@@ -323,6 +343,8 @@ class MatrixProvider @Inject constructor(
         val sendHandle: SendHandle? = null,
         val media: MediaSnapshot? = null,
         val reactions: List<MatrixObservedReaction> = emptyList(),
+        val editable: Boolean = false,
+        val canReply: Boolean = false,
     )
 
     private data class MediaSnapshot(val sourceJson: String, val filename: String, val mimeType: String)
@@ -363,13 +385,14 @@ class MatrixProvider @Inject constructor(
             media, event.reactions.flatMap { reaction ->
                 reaction.senders.map { sender -> MatrixObservedReaction(sender.senderId, reaction.key,
                     sender.timestamp.toLong()) }
-            })
+            }, event.isEditable, event.canBeRepliedTo)
     }
 
     private suspend fun ingest(accountId: String, roomId: String, title: String, item: Snapshot) {
         val localId = database.providerSyncDao().mapping(accountId, "message", item.eventId)?.localId
             ?: ProviderIds.message(ProviderIds.namespace(id, accountId), item.eventId)
         val existing = database.messageDao().getMessage(localId)
+        messageFlags[localId] = MessageFlags(item.isOwn, item.editable, item.canReply)
         if (item.transactionId != null && item.sendHandle != null) {
             sendHandles.put("$accountId|${item.eventId}", item.sendHandle)?.close()
         }
@@ -435,11 +458,68 @@ class MatrixProvider @Inject constructor(
         else -> null
     }
 
-    override fun connectionIssue(route: MessageRoute): String? =
-        connectionIssue(route.accountId)
-            ?: if (route.remoteThreadId != null &&
-                timelines.containsKey("${route.accountId}|${route.remoteThreadId}")) null
-            else "Wait for this Matrix room to sync before sending."
+    override fun connectionIssue(route: MessageRoute): String? {
+        connectionIssue(route.accountId)?.let { return it }
+        val room = route.remoteThreadId?.let { timelines["${route.accountId}|$it"] }
+            ?: return "Wait for this Matrix room to sync before sending."
+        return if (room.permissions.send) null else "You cannot send messages in this Matrix room."
+    }
+
+    suspend fun availableActions(messageId: String): MatrixMessageActions {
+        val message = database.messageDao().getMessage(messageId) ?: return MatrixMessageActions()
+        val thread = database.threadDao().getThread(message.threadId) ?: return MatrixMessageActions()
+        if (thread.providerId != id || thread.networkType != "MATRIX" || message.isDeleted) {
+            return MatrixMessageActions()
+        }
+        val accountId = thread.accountId ?: return MatrixMessageActions()
+        val permissions = timelines["$accountId|${thread.providerThreadId}"]?.permissions
+            ?: return MatrixMessageActions()
+        val flags = messageFlags[messageId] ?: return MatrixMessageActions()
+        val remoteId = remoteEventId(accountId, messageId, message.providerMessageId)
+        if (remoteId == null) return MatrixMessageActions()
+        return MatrixMessageActions(
+            react = permissions.react,
+            edit = flags.isOwn && flags.editable && permissions.send,
+            unsend = flags.isOwn && permissions.redactOwn,
+            reply = flags.canReply && permissions.send,
+        )
+    }
+
+    private suspend fun remoteEventId(accountId: String, localId: String, providerMessageId: String): String? =
+        providerMessageId.takeIf { it.startsWith("$") }
+            ?: database.providerSyncDao().remoteEventIdForMessage(accountId, localId)
+
+    private suspend fun actionTarget(messageId: String): Triple<String, String, String> {
+        val message = database.messageDao().getMessage(messageId) ?: error("Message no longer exists.")
+        val thread = database.threadDao().getThread(message.threadId) ?: error("Conversation no longer exists.")
+        val accountId = thread.accountId ?: error("This Matrix conversation has no account.")
+        val eventId = remoteEventId(accountId, messageId, message.providerMessageId)
+            ?: error("Wait for this Matrix message to finish sending.")
+        return Triple(accountId, thread.providerThreadId, eventId)
+    }
+
+    suspend fun toggleReaction(messageId: String, emoji: String) {
+        require(emoji.isNotBlank()) { "Choose a reaction first." }
+        check(availableActions(messageId).react) { "Reactions are unavailable in this room." }
+        val (accountId, roomId, eventId) = actionTarget(messageId)
+        val timeline = timelines["$accountId|$roomId"]?.timeline ?: error("Open this Matrix room first.")
+        timeline.toggleReaction(EventOrTransactionId.EventId(eventId), emoji)
+    }
+
+    suspend fun editMessage(messageId: String, newBody: String) {
+        require(newBody.isNotBlank()) { "An edit cannot be empty." }
+        check(availableActions(messageId).edit) { "Editing is unavailable for this message." }
+        val (accountId, roomId, eventId) = actionTarget(messageId)
+        val room = clients[accountId]?.getRoom(roomId) ?: error("Reconnect this Matrix account first.")
+        room.use { it.edit(eventId, messageEventContentFromMarkdown(newBody.trim())) }
+    }
+
+    suspend fun unsendMessage(messageId: String) {
+        check(availableActions(messageId).unsend) { "Unsend is unavailable for this message." }
+        val (accountId, roomId, eventId) = actionTarget(messageId)
+        val room = clients[accountId]?.getRoom(roomId) ?: error("Reconnect this Matrix account first.")
+        room.use { it.redact(eventId, null) }
+    }
 
     override suspend fun send(threadId: String, body: String, attachments: List<Uri>) {
         require(body.isNotBlank() || attachments.isNotEmpty()) { "Write a message or attach a file." }

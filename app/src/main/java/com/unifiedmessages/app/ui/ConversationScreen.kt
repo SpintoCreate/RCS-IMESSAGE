@@ -3,6 +3,7 @@ package com.unifiedmessages.app.ui
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.horizontalScroll
@@ -72,6 +73,7 @@ import com.unifiedmessages.app.model.Conversation
 import com.unifiedmessages.app.model.MessageSource
 import com.unifiedmessages.app.data.local.DeliveryStatus
 import com.unifiedmessages.app.provider.SendAvailability
+import com.unifiedmessages.app.matrix.MatrixMessageActions
 import com.unifiedmessages.app.ui.components.AppBubble
 import com.unifiedmessages.app.ui.components.AppFab
 import com.unifiedmessages.app.ui.components.AppInputBar
@@ -94,6 +96,10 @@ fun ConversationScreen(
     onAttach: () -> Unit = {},
     onRemoveAttachment: (Uri) -> Unit = {},
     onRetry: (String) -> Unit = {},
+    onLoadMatrixActions: (String, (MatrixMessageActions) -> Unit) -> Unit = { _, _ -> },
+    onReact: (String, String) -> Unit = { _, _ -> },
+    onEdit: (String, String) -> Unit = { _, _ -> },
+    onUnsend: (String) -> Unit = {},
     smsAccessBanner: String? = null,
     onRequestSmsAccess: () -> Unit = {},
     onBack: () -> Unit,
@@ -182,7 +188,9 @@ fun ConversationScreen(
                 }
             }
             items(visibleMessages, key = { it.id }) { message ->
-                MessageBubble(message, onRetry)
+                MessageBubble(message, onRetry,
+                    onLoadMatrixActions.takeIf { conversation.source == MessageSource.MATRIX },
+                    onReact, onEdit, onUnsend)
             }
         }
 
@@ -386,9 +394,17 @@ fun ConversationScreen(
 }
 
 @Composable
-private fun MessageBubble(message: ChatMessage, onRetry: (String) -> Unit) {
+private fun MessageBubble(
+    message: ChatMessage,
+    onRetry: (String) -> Unit,
+    onLoadMatrixActions: ((String, (MatrixMessageActions) -> Unit) -> Unit)?,
+    onReact: (String, String) -> Unit,
+    onEdit: (String, String) -> Unit,
+    onUnsend: (String) -> Unit,
+) {
     val palette = LocalAppTheme.current
     var attachmentsOpen by remember(message.id) { mutableStateOf(false) }
+    var matrixActions by remember(message.id) { mutableStateOf<MatrixMessageActions?>(null) }
     val shape = RoundedCornerShape(
         topStart = 16.dp,
         topEnd = 16.dp,
@@ -404,7 +420,16 @@ private fun MessageBubble(message: ChatMessage, onRetry: (String) -> Unit) {
         Column(horizontalAlignment = if (message.isMine) Alignment.End else Alignment.Start) {
             AppBubble(
                 outgoing = message.isMine,
-                modifier = if (message.attachments.isNotEmpty()) {
+                modifier = if (onLoadMatrixActions != null) {
+                    Modifier.combinedClickable(
+                        onClick = { if (message.attachments.isNotEmpty()) attachmentsOpen = true },
+                        onLongClick = {
+                            onLoadMatrixActions(message.id) { actions ->
+                                if (actions.react || actions.edit || actions.unsend) matrixActions = actions
+                            }
+                        },
+                    )
+                } else if (message.attachments.isNotEmpty()) {
                     Modifier.clickable(onClickLabel = "Open media attachments") { attachmentsOpen = true }
                 } else Modifier,
                 shape = shape,
@@ -432,5 +457,14 @@ private fun MessageBubble(message: ChatMessage, onRetry: (String) -> Unit) {
     }
     if (attachmentsOpen) {
         MessageAttachmentsDialog(message.attachments, onDismiss = { attachmentsOpen = false })
+    }
+    matrixActions?.let { actions ->
+        MatrixMessageActionDialog(
+            actions = actions, originalText = message.text,
+            onReact = { emoji -> onReact(message.id, emoji) },
+            onEdit = { body -> onEdit(message.id, body) },
+            onUnsend = { onUnsend(message.id) },
+            onDismiss = { matrixActions = null },
+        )
     }
 }

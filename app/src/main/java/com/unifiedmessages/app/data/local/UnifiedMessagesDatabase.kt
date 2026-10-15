@@ -227,6 +227,9 @@ interface ProviderSyncDao {
     @Query("SELECT * FROM remote_id_mappings WHERE accountId = :accountId AND entityType = :entityType AND remoteId = :remoteId LIMIT 1")
     suspend fun mapping(accountId: String, entityType: String, remoteId: String): RemoteIdMappingEntity?
 
+    @Query("SELECT remoteId FROM remote_id_mappings WHERE accountId = :accountId AND entityType = 'message' AND localId = :localId AND remoteId LIKE '$%' ORDER BY remoteId LIMIT 1")
+    suspend fun remoteEventIdForMessage(accountId: String, localId: String): String?
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertMapping(mapping: RemoteIdMappingEntity): Long
 
