@@ -206,6 +206,7 @@ private fun ThreadEntity.toMessageRoute(): MessageRoute = MessageRoute(
     accountId = accountId ?: "$providerId:local",
     providerId = providerId,
     networkType = NetworkType.fromSource(networkType ?: source),
+    remoteThreadId = providerThreadId,
 )
 
 private fun initialsFor(name: String): String = name.trim()

@@ -4,6 +4,7 @@ import android.net.Uri
 import com.unifiedmessages.app.data.local.UnifiedMessagesDatabase
 import com.unifiedmessages.app.sms.PhoneNumbers
 import com.unifiedmessages.app.sms.SmsProvider
+import com.unifiedmessages.app.matrix.MatrixProvider
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -24,6 +25,7 @@ data class MessageRoute(
     val accountId: String,
     val providerId: String,
     val networkType: NetworkType,
+    val remoteThreadId: String? = null,
 ) {
     val label: String get() = networkType.label
 }
@@ -46,6 +48,7 @@ private class RoomSendRouteLookup(private val database: UnifiedMessagesDatabase)
                 thread.accountId ?: "${thread.providerId}:local",
                 thread.providerId,
                 NetworkType.fromSource(thread.networkType ?: thread.source),
+                thread.providerThreadId,
             )
         }
 
@@ -57,6 +60,8 @@ private class RoomSendRouteLookup(private val database: UnifiedMessagesDatabase)
 interface SendCommandProvider {
     val id: String
     fun connectionIssue(): String?
+    fun connectionIssue(accountId: String): String? = connectionIssue()
+    fun connectionIssue(route: MessageRoute): String? = connectionIssue(route.accountId)
     suspend fun send(threadId: String, body: String, attachments: List<Uri>)
     suspend fun retry(messageId: String)
 }
@@ -67,8 +72,8 @@ class ProviderSendRouter private constructor(
     private val routes: SendRouteLookup,
     providers: List<SendCommandProvider>,
 ) {
-    @Inject constructor(database: UnifiedMessagesDatabase, smsProvider: SmsProvider) :
-        this(RoomSendRouteLookup(database), listOf(smsProvider))
+    @Inject constructor(database: UnifiedMessagesDatabase, smsProvider: SmsProvider, matrixProvider: MatrixProvider) :
+        this(RoomSendRouteLookup(database), listOf(smsProvider, matrixProvider))
 
     private val providers = providers.associateBy { it.id }
     private val sendingThreads = ConcurrentHashMap.newKeySet<String>()
@@ -76,7 +81,7 @@ class ProviderSendRouter private constructor(
     fun availability(route: MessageRoute, recipients: List<String>, region: String): SendAvailability {
         val provider = providerFor(route)
             ?: return SendAvailability(route.label, "Messaging is not connected for this conversation.")
-        val issue = provider.connectionIssue()
+        val issue = provider.connectionIssue(route)
         if (issue != null) return SendAvailability(route.label, issue)
         if (route.providerId == "sms" && (recipients.isEmpty() ||
                 recipients.any { !PhoneNumbers.isReplyableAddress(it, region) })) {
@@ -92,7 +97,7 @@ class ProviderSendRouter private constructor(
         try {
             val route = routes.forThread(threadId) ?: error("Conversation no longer exists.")
             val provider = providerFor(route) ?: error("Messaging is not connected for this conversation.")
-            provider.connectionIssue()?.let(::error)
+            provider.connectionIssue(route)?.let(::error)
             provider.send(threadId, text, attachments)
         } finally {
             sendingThreads.remove(threadId)
@@ -104,7 +109,7 @@ class ProviderSendRouter private constructor(
         check(sendingThreads.add(route.threadId)) { "A message is already sending in this conversation." }
         try {
             val provider = providerFor(route) ?: error("Messaging is not connected for this conversation.")
-            provider.connectionIssue()?.let(::error)
+            provider.connectionIssue(route)?.let(::error)
             provider.retry(messageId)
         } finally {
             sendingThreads.remove(route.threadId)
@@ -114,6 +119,8 @@ class ProviderSendRouter private constructor(
     private fun providerFor(route: MessageRoute): SendCommandProvider? = when {
         route.providerId == "sms" && route.accountId == "sms:local" &&
             route.networkType in setOf(NetworkType.SMS, NetworkType.MMS) -> providers["sms"]
+        route.providerId == "matrix" && route.accountId.startsWith("matrix:") &&
+            route.networkType == NetworkType.MATRIX -> providers["matrix"]
         else -> null
     }
 

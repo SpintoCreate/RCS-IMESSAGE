@@ -16,6 +16,7 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     private var sharedAttachments by mutableStateOf<List<Uri>>(emptyList())
     private var requestedRecipient by mutableStateOf<String?>(null)
+    private var matrixCallbackUrl by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -25,8 +26,10 @@ class MainActivity : ComponentActivity() {
             UnifiedMessagesApp(
                 sharedAttachments = sharedAttachments,
                 requestedRecipient = requestedRecipient,
+                matrixCallbackUrl = matrixCallbackUrl,
                 onShareHandled = { sharedAttachments = emptyList() },
                 onRecipientHandled = { requestedRecipient = null },
+                onMatrixCallbackHandled = { matrixCallbackUrl = null },
             )
         }
     }
@@ -55,6 +58,11 @@ class MainActivity : ComponentActivity() {
             Intent.ACTION_SENDTO -> {
                 requestedRecipient = intent.data?.schemeSpecificPart?.substringBefore('?')
                     ?.takeIf { it.isNotBlank() }
+            }
+            Intent.ACTION_VIEW -> {
+                if (intent.data?.scheme == "unifiedmessages" && intent.data?.host == "matrix-auth") {
+                    matrixCallbackUrl = intent.dataString
+                }
             }
         }
     }

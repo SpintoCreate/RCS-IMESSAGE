@@ -2,6 +2,7 @@ package com.unifiedmessages.app.matrix
 
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.util.Base64
 import com.unifiedmessages.app.data.local.ProviderAccountEntity
 import com.unifiedmessages.app.data.local.ContentType
@@ -11,10 +12,12 @@ import com.unifiedmessages.app.data.local.ProviderIds
 import com.unifiedmessages.app.data.local.SyncCursorEntity
 import com.unifiedmessages.app.data.local.UnifiedMessagesDatabase
 import com.unifiedmessages.app.provider.Capabilities
+import com.unifiedmessages.app.provider.DeliveryUpdated
 import com.unifiedmessages.app.provider.MessageEvent
 import com.unifiedmessages.app.provider.MessageDeleted
 import com.unifiedmessages.app.provider.MessageEdited
 import com.unifiedmessages.app.provider.MessageProvider
+import com.unifiedmessages.app.provider.MessageRoute
 import com.unifiedmessages.app.provider.MessageReceived
 import com.unifiedmessages.app.provider.MessageSent
 import com.unifiedmessages.app.provider.ProviderMessage
@@ -23,9 +26,11 @@ import com.unifiedmessages.app.provider.ProviderThread
 import com.unifiedmessages.app.provider.SendCommandProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
+import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +55,13 @@ import org.matrix.rustcomponents.sdk.EventOrTransactionId
 import org.matrix.rustcomponents.sdk.TimelineItemContent
 import org.matrix.rustcomponents.sdk.MsgLikeKind
 import org.matrix.rustcomponents.sdk.SyncSettingsV2
+import org.matrix.rustcomponents.sdk.EventSendState
+import org.matrix.rustcomponents.sdk.SendHandle
+import org.matrix.rustcomponents.sdk.messageEventContentFromMarkdown
+import org.matrix.rustcomponents.sdk.FileInfo
+import org.matrix.rustcomponents.sdk.UploadParameters
+import org.matrix.rustcomponents.sdk.UploadSource
+import org.matrix.rustcomponents.sdk.SsoHandler
 
 data class MatrixLoginMethods(val password: Boolean, val sso: Boolean, val oidc: Boolean)
 
@@ -70,6 +82,11 @@ class MatrixProvider @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private data class RoomTimeline(val timeline: Timeline, val listener: TaskHandle)
     private val timelines = ConcurrentHashMap<String, RoomTimeline>()
+    private val sendHandles = ConcurrentHashMap<String, SendHandle>()
+    private data class PendingBrowserLogin(
+        val client: Client, val handler: SsoHandler, val reference: String, val storeKey: String,
+    )
+    @Volatile private var pendingBrowserLogin: PendingBrowserLogin? = null
 
     fun accounts(): Flow<List<ProviderAccountEntity>> = database.providerAccountDao().observe(id)
 
@@ -113,6 +130,50 @@ class MatrixProvider @Inject constructor(
             }
         }
 
+    /** Opens the homeserver's SSO page in the system browser; the app receives a deep-link callback. */
+    suspend fun beginSso(homeserver: String): String = withContext(Dispatchers.IO) {
+        require(homeserver.isNotBlank()) { "Enter a homeserver first." }
+        pendingBrowserLogin?.let { it.handler.close(); it.client.close() }
+        pendingBrowserLogin = null
+        val reference = "sso-${UUID.randomUUID()}"
+        val storeKey = randomStoreKey()
+        val client = buildClient(homeserver.trim(), reference, storeKey)
+        try {
+            check(client.homeserverLoginDetails().supportsSsoLogin()) {
+                "This homeserver does not offer SSO sign-in."
+            }
+            val handler = client.startSsoLogin("unifiedmessages://matrix-auth", null)
+            pendingBrowserLogin = PendingBrowserLogin(client, handler, reference, storeKey)
+            handler.url()
+        } catch (error: Exception) {
+            client.close()
+            throw error
+        }
+    }
+
+    suspend fun finishSso(callbackUrl: String): ProviderAccountEntity = withContext(Dispatchers.IO) {
+        val pending = pendingBrowserLogin ?: error("Sign-in expired. Start browser sign-in again.")
+        pendingBrowserLogin = null
+        try {
+            pending.handler.finish(callbackUrl)
+            val session = pending.client.session()
+            secrets.write(pending.reference, MatrixSecretStore.Record(session, pending.storeKey))
+            val account = ProviderAccountEntity(
+                id = "matrix:${session.userId}", providerId = id, remoteSelfId = session.userId,
+                connectionState = "CONNECTED", credentialRef = pending.reference,
+                homeserver = session.homeserverUrl,
+            )
+            database.providerAccountDao().upsert(account)
+            clients.put(account.id, pending.client)?.close()
+            account
+        } catch (error: Exception) {
+            pending.client.close()
+            throw error
+        } finally {
+            pending.handler.close()
+        }
+    }
+
     /** Restores every locally saved login without asking for a password again. */
     suspend fun restoreAccounts(): List<ProviderAccountEntity> = withContext(Dispatchers.IO) {
         database.providerAccountDao().all(id).map { account ->
@@ -139,6 +200,9 @@ class MatrixProvider @Inject constructor(
         val account = database.providerAccountDao().get(accountId) ?: return@withContext
         timelines.keys.filter { it.startsWith("$accountId|") }.forEach { key ->
             timelines.remove(key)?.let { it.listener.close(); it.timeline.close() }
+        }
+        sendHandles.keys.filter { it.startsWith("$accountId|") }.forEach { key ->
+            sendHandles.remove(key)?.close()
         }
         val client = clients.remove(accountId)
         try {
@@ -197,11 +261,17 @@ class MatrixProvider @Inject constructor(
         val eventId: String, val sender: String, val timestamp: Long,
         val body: String?, val contentType: ContentType, val isOwn: Boolean,
         val edited: Boolean, val redacted: Boolean,
+        val transactionId: String? = null,
+        val remoteEventId: String? = null,
+        val deliveryStatus: DeliveryStatus? = null,
+        val sendHandle: SendHandle? = null,
     )
 
     private fun snapshot(item: TimelineItem): Snapshot? {
         val event = item.asEvent() ?: return null
-        val eventId = (event.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId ?: return null
+        val transactionId = (event.eventOrTransactionId as? EventOrTransactionId.TransactionId)?.transactionId
+        val eventId = (event.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId
+            ?: transactionId?.let { "txn:$it" } ?: return null
         val content = event.content as? TimelineItemContent.MsgLike ?: return null
         val kind = content.content.kind
         val message = kind as? MsgLikeKind.Message
@@ -210,24 +280,45 @@ class MatrixProvider @Inject constructor(
         val type = if (message?.content?.msgType is org.matrix.rustcomponents.sdk.MessageType.Text) {
             ContentType.TEXT
         } else ContentType.MEDIA
+        val sendState = event.localSendState
+        val deliveryStatus = when (sendState) {
+            is EventSendState.NotSentYet -> DeliveryStatus.PENDING
+            is EventSendState.SendingFailed -> DeliveryStatus.FAILED
+            is EventSendState.Sent -> DeliveryStatus.SENT
+            else -> null
+        }
         return Snapshot(eventId, event.sender, event.timestamp.toLong(), body, type,
-            event.isOwn, message?.content?.isEdited == true, kind is MsgLikeKind.Redacted)
+            event.isOwn, message?.content?.isEdited == true, kind is MsgLikeKind.Redacted,
+            transactionId, (sendState as? EventSendState.Sent)?.eventId,
+            deliveryStatus, if (transactionId != null) event.lazyProvider.getSendHandle() else null)
     }
 
     private suspend fun ingest(accountId: String, roomId: String, title: String, item: Snapshot) {
-        val localId = ProviderIds.message(ProviderIds.namespace(id, accountId), item.eventId)
+        val localId = database.providerSyncDao().mapping(accountId, "message", item.eventId)?.localId
+            ?: ProviderIds.message(ProviderIds.namespace(id, accountId), item.eventId)
         val existing = database.messageDao().getMessage(localId)
+        if (item.transactionId != null && item.sendHandle != null) {
+            sendHandles.put("$accountId|${item.eventId}", item.sendHandle)?.close()
+        }
         if (existing == null) {
             val thread = ProviderThread(roomId, "MATRIX", title,
                 participants = listOf(ProviderParticipant(item.sender, isSelf = item.isOwn)))
             val message = ProviderMessage(item.eventId, item.body, item.contentType, item.timestamp,
                 senderAddress = if (item.isOwn) null else item.sender,
-                deliveryStatus = if (item.isOwn) DeliveryStatus.SENT else DeliveryStatus.RECEIVED)
+                deliveryStatus = item.deliveryStatus ?: if (item.isOwn) DeliveryStatus.SENT else DeliveryStatus.RECEIVED)
             val base = if (item.isOwn) MessageSent(id, "timeline:$roomId:${item.eventId}", item.timestamp,
                 thread, message, accountId)
             else MessageReceived(id, "timeline:$roomId:${item.eventId}", item.timestamp,
                 thread, message, accountId)
             if (reducer.apply(base)) emitted.emit(base)
+        }
+        if (item.remoteEventId != null && item.transactionId != null) {
+            reducer.bindRemoteMessageId(accountId, id, item.remoteEventId, localId)
+        }
+        if (item.deliveryStatus != null && item.transactionId != null) {
+            val statusEvent = DeliveryUpdated(id, "state:$roomId:${item.eventId}:${item.deliveryStatus}",
+                System.currentTimeMillis(), item.eventId, item.deliveryStatus, accountId)
+            if (reducer.apply(statusEvent)) emitted.emit(statusEvent)
         }
         val event: MessageEvent = when {
             item.redacted -> MessageDeleted(id, "redacted:$roomId:${item.eventId}", item.timestamp,
@@ -241,14 +332,83 @@ class MatrixProvider @Inject constructor(
         }
     }
 
-    override fun connectionIssue(): String? = "Select a connected Matrix account to send."
+    override fun connectionIssue(): String? =
+        if (clients.isEmpty()) "Sign in to a Matrix account to send." else null
+
+    override fun connectionIssue(accountId: String): String? = when {
+        !clients.containsKey(accountId) -> "Reconnect this Matrix account to send."
+        timelines.keys.none { it.startsWith("$accountId|") } -> "Wait for this Matrix account to sync."
+        else -> null
+    }
+
+    override fun connectionIssue(route: MessageRoute): String? =
+        connectionIssue(route.accountId)
+            ?: if (route.remoteThreadId != null &&
+                timelines.containsKey("${route.accountId}|${route.remoteThreadId}")) null
+            else "Wait for this Matrix room to sync before sending."
 
     override suspend fun send(threadId: String, body: String, attachments: List<Uri>) {
-        error("Matrix sending is not connected to room timelines yet.")
+        require(body.isNotBlank() || attachments.isNotEmpty()) { "Write a message or attach a file." }
+        val thread = database.threadDao().getThread(threadId) ?: error("Conversation no longer exists.")
+        val accountId = thread.accountId ?: error("This Matrix conversation has no account.")
+        val timeline = timelines["$accountId|${thread.providerThreadId}"]?.timeline
+            ?: error("Wait for this Matrix room to sync before sending.")
+        if (attachments.isEmpty()) {
+            timeline.send(messageEventContentFromMarkdown(body)).close()
+        } else {
+            attachments.forEachIndexed { index, uri ->
+                val filename = attachmentName(uri)
+                val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
+                val bytes = readAttachment(uri)
+                val parameters = UploadParameters(
+                    UploadSource.Data(bytes, filename),
+                    body.takeIf { index == 0 && it.isNotBlank() }, null, null, null,
+                )
+                timeline.sendFile(parameters, FileInfo(mimeType, bytes.size.toULong(), null, null)).use {
+                    it.join()
+                }
+            }
+        }
+    }
+
+    private fun attachmentName(uri: Uri): String =
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0)?.takeIf(String::isNotBlank) else null
+            } ?: "attachment"
+
+    private fun readAttachment(uri: Uri): ByteArray {
+        val input = context.contentResolver.openInputStream(uri) ?: error("Cannot open the selected file.")
+        return input.use { source ->
+            val output = ByteArrayOutputStream()
+            val chunk = ByteArray(8192)
+            while (true) {
+                val count = source.read(chunk)
+                if (count < 0) break
+                check(output.size() + count <= 25 * 1024 * 1024) {
+                    "This file is larger than the 25 MB upload limit."
+                }
+                output.write(chunk, 0, count)
+            }
+            output.toByteArray()
+        }
     }
 
     override suspend fun retry(messageId: String) {
-        error("Matrix retry is not available yet.")
+        val message = database.messageDao().getMessage(messageId) ?: error("Message no longer exists.")
+        require(message.deliveryStatus == DeliveryStatus.FAILED && message.providerMessageId.startsWith("txn:")) {
+            "Only a failed Matrix message can be retried."
+        }
+        val thread = database.threadDao().getThread(message.threadId) ?: error("Conversation no longer exists.")
+        val accountId = thread.accountId ?: error("This Matrix conversation has no account.")
+        val handle = sendHandles["$accountId|${message.providerMessageId}"]
+            ?: error("Reopen this room and let it sync before retrying.")
+        database.messageDao().update(message.copy(deliveryStatus = DeliveryStatus.PENDING))
+        try { handle.tryResend() }
+        catch (error: Exception) {
+            database.messageDao().update(message)
+            throw error
+        }
     }
 
     private suspend fun buildClient(homeserver: String, reference: String, storeKey: String): Client {

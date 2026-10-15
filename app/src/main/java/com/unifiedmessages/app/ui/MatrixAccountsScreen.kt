@@ -36,6 +36,7 @@ fun MatrixAccountsScreen(
     state: MatrixAccountUiState,
     onDiscover: (String) -> Unit,
     onPasswordLogin: (String, String, String) -> Unit,
+    onSsoLogin: (String) -> Unit,
     onLogout: (String) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
@@ -95,8 +96,15 @@ fun MatrixAccountsScreen(
                 }
             }
             if (methods.sso || methods.oidc) {
-                Text("This homeserver also offers browser sign-in. Browser sign-in is not connected yet.",
-                    color = theme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                if (methods.sso) {
+                    Button(onClick = { onSsoLogin(homeserver) }, enabled = !state.busy) {
+                        Text("Sign in with browser")
+                    }
+                }
+                if (methods.oidc && !methods.sso) {
+                    Text("This homeserver requires OIDC sign-in, which is not connected yet.",
+                        color = theme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                }
             }
             if (!methods.password && !methods.sso && !methods.oidc) {
                 Text("This homeserver did not report a supported sign-in method.", color = theme.onSurfaceVariant)

@@ -64,6 +64,19 @@ class ProviderSendRouterTest {
             router.availability(unknown, emptyList(), "US").disabledReason)
     }
 
+    @Test fun matrixRouteUsesItsAccountWithoutPhoneNumberChecks() = runBlocking {
+        val matrix = route.copy(accountId = "matrix:@alice:matrix.org", providerId = "matrix",
+            networkType = NetworkType.MATRIX, remoteThreadId = "!room:matrix.org")
+        val provider = FakeProvider("matrix")
+        val router = ProviderSendRouter.forTesting(object : SendRouteLookup {
+            override suspend fun forThread(threadId: String) = matrix.takeIf { it.threadId == threadId }
+            override suspend fun forMessage(messageId: String): MessageRoute? = null
+        }, listOf(provider))
+        assertTrue(router.availability(matrix, listOf("@bob:matrix.org"), "US").canSend)
+        router.send(matrix.threadId, "Hi", emptyList())
+        assertEquals(listOf("Hi"), provider.sent)
+    }
+
     private fun router(provider: FakeProvider) = ProviderSendRouter.forTesting(
         object : SendRouteLookup {
             override suspend fun forThread(threadId: String): MessageRoute? =
@@ -74,8 +87,7 @@ class ProviderSendRouterTest {
         listOf(provider),
     )
 
-    private class FakeProvider : SendCommandProvider {
-        override val id = "sms"
+    private class FakeProvider(override val id: String = "sms") : SendCommandProvider {
         var issue: String? = null
         var onSend: suspend () -> Unit = {}
         val sent = mutableListOf<String>()

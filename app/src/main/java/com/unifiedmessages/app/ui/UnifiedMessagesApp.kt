@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.role.RoleManager
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Telephony
@@ -84,8 +85,10 @@ interface MessageDisplayEntryPoint {
 fun UnifiedMessagesApp(
     sharedAttachments: List<Uri> = emptyList(),
     requestedRecipient: String? = null,
+    matrixCallbackUrl: String? = null,
     onShareHandled: () -> Unit = {},
     onRecipientHandled: () -> Unit = {},
+    onMatrixCallbackHandled: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val inboxViewModel: InboxViewModel = hiltViewModel()
@@ -181,6 +184,13 @@ fun UnifiedMessagesApp(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(Unit) { smsConnectionViewModel.refresh() }
+    LaunchedEffect(matrixCallbackUrl) {
+        if (matrixCallbackUrl != null) {
+            matrixAccountsOpen = true
+            matrixAccountViewModel.finishSso(matrixCallbackUrl)
+            onMatrixCallbackHandled()
+        }
+    }
     LaunchedEffect(sharedAttachments, welcomeSeen) {
         if (sharedAttachments.isNotEmpty() && welcomeSeen) {
             selectedAttachments = (selectedAttachments + sharedAttachments).distinct()
@@ -328,6 +338,11 @@ fun UnifiedMessagesApp(
                             state = matrixAccountState,
                             onDiscover = matrixAccountViewModel::discover,
                             onPasswordLogin = matrixAccountViewModel::loginPassword,
+                            onSsoLogin = { homeserver ->
+                                matrixAccountViewModel.beginSso(homeserver) { url ->
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                }
+                            },
                             onLogout = matrixAccountViewModel::logout,
                             onBack = { matrixAccountsOpen = false },
                         )
