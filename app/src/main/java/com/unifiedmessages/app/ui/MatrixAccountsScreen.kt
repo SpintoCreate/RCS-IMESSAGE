@@ -39,6 +39,7 @@ fun MatrixAccountsScreen(
     onSsoLogin: (String) -> Unit,
     onOidcLogin: (String) -> Unit,
     onLogout: (String) -> Unit,
+    onRecoverKeys: (String, String) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -46,6 +47,7 @@ fun MatrixAccountsScreen(
     var homeserver by rememberSaveable { mutableStateOf("matrix.org") }
     var username by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
+    var recoveryKey by rememberSaveable { mutableStateOf("") }
     Column(
         modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -68,6 +70,27 @@ fun MatrixAccountsScreen(
                     Text(account.remoteSelfId ?: account.id, color = theme.onSurface)
                     Text(account.connectionState.lowercase().replaceFirstChar { it.titlecase() },
                         color = theme.onSurfaceVariant)
+                    if (account.connectionState == "CONNECTED") {
+                        val security = state.security[account.id]
+                        if (security?.verification == "UNVERIFIED") {
+                            Text("This device is not verified. Verify it from a trusted Matrix device before trusting encrypted chats.",
+                                color = theme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                        }
+                        if (security?.recovery == "ENABLED" || security?.recovery == "INCOMPLETE") {
+                            Text("Can't read older encrypted messages? Enter your Matrix recovery key to restore them.",
+                                color = theme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                            OutlinedTextField(value = recoveryKey, onValueChange = { recoveryKey = it },
+                                label = { Text("Recovery key") }, singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                modifier = Modifier.fillMaxWidth())
+                            Button(onClick = {
+                                onRecoverKeys(account.id, recoveryKey)
+                                recoveryKey = ""
+                            }, enabled = !state.busy && recoveryKey.isNotBlank()) {
+                                Text("Restore encrypted messages")
+                            }
+                        }
+                    }
                     if (account.credentialRef != null) {
                         TextButton(onClick = { onLogout(account.id) }, enabled = !state.busy) {
                             Text("Sign out")

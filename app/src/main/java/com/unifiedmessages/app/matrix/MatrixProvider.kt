@@ -69,6 +69,7 @@ import org.matrix.rustcomponents.sdk.MessageType
 import org.matrix.rustcomponents.sdk.MediaSource
 
 data class MatrixLoginMethods(val password: Boolean, val sso: Boolean, val oidc: Boolean)
+data class MatrixSecurityStatus(val recovery: String, val verification: String)
 
 /** One native Matrix client and encrypted SDK store per signed-in account. */
 @Singleton
@@ -94,6 +95,19 @@ class MatrixProvider @Inject constructor(
     @Volatile private var pendingBrowserLogin: PendingBrowserLogin? = null
 
     fun accounts(): Flow<List<ProviderAccountEntity>> = database.providerAccountDao().observe(id)
+
+    fun securityStatus(accountId: String): MatrixSecurityStatus {
+        val client = clients[accountId] ?: return MatrixSecurityStatus("UNKNOWN", "UNKNOWN")
+        return client.encryption().use { encryption ->
+            MatrixSecurityStatus(encryption.recoveryState().name, encryption.verificationState().name)
+        }
+    }
+
+    suspend fun recoverKeys(accountId: String, recoveryKey: String) = withContext(Dispatchers.IO) {
+        require(recoveryKey.isNotBlank()) { "Enter the recovery key from your other Matrix app." }
+        val client = clients[accountId] ?: error("Reconnect this Matrix account first.")
+        client.encryption().use { it.recover(recoveryKey.trim()) }
+    }
 
     /** Discovery runs against the entered homeserver; matrix.org is the default for the UI. */
     suspend fun offeredLoginMethods(homeserver: String = "matrix.org"): MatrixLoginMethods = withContext(Dispatchers.IO) {
@@ -313,9 +327,6 @@ class MatrixProvider @Inject constructor(
         val message = kind as? MsgLikeKind.Message
         if (message == null && kind !is MsgLikeKind.Redacted) return null
         val body = message?.content?.body
-        val type = if (message?.content?.msgType is org.matrix.rustcomponents.sdk.MessageType.Text) {
-            ContentType.TEXT
-        } else ContentType.MEDIA
         val media = when (val msgType = message?.content?.msgType) {
             is MessageType.Image -> MediaSnapshot(msgType.content.source.toJson(), msgType.content.filename,
                 msgType.content.info?.mimetype ?: "image/*")
@@ -327,6 +338,7 @@ class MatrixProvider @Inject constructor(
                 msgType.content.info?.mimetype ?: "application/octet-stream")
             else -> null
         }
+        val type = if (media == null) ContentType.TEXT else ContentType.MEDIA
         val sendState = event.localSendState
         val deliveryStatus = when (sendState) {
             is EventSendState.NotSentYet -> DeliveryStatus.PENDING

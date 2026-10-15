@@ -349,6 +349,7 @@ fun UnifiedMessagesApp(
                                 }
                             },
                             onLogout = matrixAccountViewModel::logout,
+                            onRecoverKeys = matrixAccountViewModel::recoverKeys,
                             onBack = { matrixAccountsOpen = false },
                         )
                     } else if (settingsOpen) {

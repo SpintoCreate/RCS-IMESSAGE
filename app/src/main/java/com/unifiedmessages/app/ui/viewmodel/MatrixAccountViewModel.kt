@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.unifiedmessages.app.data.local.ProviderAccountEntity
 import com.unifiedmessages.app.matrix.MatrixLoginMethods
 import com.unifiedmessages.app.matrix.MatrixProvider
+import com.unifiedmessages.app.matrix.MatrixSecurityStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
@@ -17,6 +18,7 @@ import kotlinx.coroutines.launch
 
 data class MatrixAccountUiState(
     val accounts: List<ProviderAccountEntity> = emptyList(),
+    val security: Map<String, MatrixSecurityStatus> = emptyMap(),
     val methods: MatrixLoginMethods? = null,
     val busy: Boolean = false,
     val error: String? = null,
@@ -42,7 +44,11 @@ class MatrixAccountViewModel @Inject constructor(
             while (true) {
                 val connected = state.value.accounts.filter { it.connectionState == "CONNECTED" }
                 connected.forEach { account ->
-                    try { provider.syncOnce(account.id) }
+                    try {
+                        provider.syncOnce(account.id)
+                        val status = provider.securityStatus(account.id)
+                        mutableState.value = state.value.copy(security = state.value.security + (account.id to status))
+                    }
                     catch (cancelled: CancellationException) { throw cancelled }
                     catch (error: Exception) { showError(error) }
                 }
@@ -103,6 +109,16 @@ class MatrixAccountViewModel @Inject constructor(
         try {
             provider.logout(accountId)
             mutableState.value = state.value.copy(busy = false)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) { showError(error) }
+    }
+
+    fun recoverKeys(accountId: String, recoveryKey: String) = viewModelScope.launch {
+        mutableState.value = state.value.copy(busy = true, error = null)
+        try {
+            provider.recoverKeys(accountId, recoveryKey)
+            mutableState.value = state.value.copy(busy = false,
+                security = state.value.security + (accountId to provider.securityStatus(accountId)))
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { showError(error) }
     }
