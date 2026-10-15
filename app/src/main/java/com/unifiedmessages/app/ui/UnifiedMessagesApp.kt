@@ -468,6 +468,9 @@ fun UnifiedMessagesApp(
                                         onReact = messageSendViewModel::react,
                                         onEdit = messageSendViewModel::edit,
                                         onUnsend = messageSendViewModel::unsend,
+                                        onReplySend = { targetId, body, complete ->
+                                            messageSendViewModel.reply(selected.id, targetId, body, complete)
+                                        },
                                         smsAccessBanner = smsAccessBanner.takeIf { selected.source == MessageSource.SMS },
                                         onRequestSmsAccess = requestSmsAccess,
                                         onBack = { selectedId = null },
@@ -524,6 +527,9 @@ fun UnifiedMessagesApp(
                                     onReact = messageSendViewModel::react,
                                     onEdit = messageSendViewModel::edit,
                                     onUnsend = messageSendViewModel::unsend,
+                                    onReplySend = { targetId, body, complete ->
+                                        messageSendViewModel.reply(conversation.id, targetId, body, complete)
+                                    },
                                     smsAccessBanner = smsAccessBanner.takeIf { conversation.source == MessageSource.SMS },
                                     onRequestSmsAccess = requestSmsAccess,
                                     onBack = { selectedId = null },

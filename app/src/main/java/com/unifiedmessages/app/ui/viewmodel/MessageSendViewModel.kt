@@ -60,6 +60,17 @@ class MessageSendViewModel @Inject constructor(
         }
     }
 
+    fun reply(threadId: String, targetMessageId: String, body: String, onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            try { router.reply(threadId, targetMessageId, body); onComplete(true) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                mutableError.value = error.message ?: "Could not send this reply."
+                onComplete(false)
+            }
+        }
+    }
+
     fun clearError() { mutableError.value = null }
 
     fun loadMatrixActions(messageId: String, onLoaded: (MatrixMessageActions) -> Unit) {

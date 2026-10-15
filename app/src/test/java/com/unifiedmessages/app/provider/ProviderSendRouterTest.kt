@@ -77,6 +77,21 @@ class ProviderSendRouterTest {
         assertEquals(listOf("Hi"), provider.sent)
     }
 
+    @Test fun replyUsesSameRoomAndRejectsAnUnrelatedTarget() = runBlocking {
+        val matrix = route.copy(accountId = "matrix:@alice:matrix.org", providerId = "matrix",
+            networkType = NetworkType.MATRIX, remoteThreadId = "!room:matrix.org")
+        val provider = FakeReplyProvider()
+        val router = ProviderSendRouter.forTesting(object : SendRouteLookup {
+            override suspend fun forThread(threadId: String) = matrix.takeIf { it.threadId == threadId }
+            override suspend fun forMessage(messageId: String) = matrix.takeIf { messageId == "target-1" }
+        }, listOf(provider))
+        router.reply(matrix.threadId, "target-1", "  Answer  ")
+        assertEquals(listOf("target-1" to "Answer"), provider.replies)
+        assertTrue(runCatching { router.reply(matrix.threadId, "other", "Answer") }
+            .exceptionOrNull() is IllegalStateException)
+        assertEquals(1, provider.replies.size)
+    }
+
     private fun router(provider: FakeProvider) = ProviderSendRouter.forTesting(
         object : SendRouteLookup {
             override suspend fun forThread(threadId: String): MessageRoute? =
@@ -99,5 +114,16 @@ class ProviderSendRouterTest {
             onSend()
         }
         override suspend fun retry(messageId: String) { retried += messageId }
+    }
+
+    private class FakeReplyProvider : ReplyCommandProvider {
+        override val id = "matrix"
+        val replies = mutableListOf<Pair<String, String>>()
+        override fun connectionIssue(): String? = null
+        override suspend fun send(threadId: String, body: String, attachments: List<Uri>) = Unit
+        override suspend fun retry(messageId: String) = Unit
+        override suspend fun reply(threadId: String, repliedToMessageId: String, body: String) {
+            replies += repliedToMessageId to body
+        }
     }
 }

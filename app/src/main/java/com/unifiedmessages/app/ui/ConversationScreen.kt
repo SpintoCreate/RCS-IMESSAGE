@@ -100,6 +100,7 @@ fun ConversationScreen(
     onReact: (String, String) -> Unit = { _, _ -> },
     onEdit: (String, String) -> Unit = { _, _ -> },
     onUnsend: (String) -> Unit = {},
+    onReplySend: (String, String, (Boolean) -> Unit) -> Unit = { _, _, done -> done(false) },
     smsAccessBanner: String? = null,
     onRequestSmsAccess: () -> Unit = {},
     onBack: () -> Unit,
@@ -111,26 +112,32 @@ fun ConversationScreen(
     val palette = LocalAppTheme.current
     val canSend = sendAvailability.canSend
     var draft by rememberSaveable(conversation.id) { mutableStateOf("") }
+    var replyTargetId by rememberSaveable(conversation.id) { mutableStateOf<String?>(null) }
     var sendPending by remember(conversation.id) { mutableStateOf(false) }
     var searchOpen by rememberSaveable(conversation.id) { mutableStateOf(false) }
     val composerFocusRequester = remember { FocusRequester() }
     val listState = rememberLazyListState()
     val hasPayload = draft.isNotBlank() || attachments.isNotEmpty()
     fun submit() {
-        if (!canSend || !hasPayload || sendPending) return
+        if (!canSend || !hasPayload || sendPending ||
+            (replyTargetId != null && attachments.isNotEmpty())) return
         val submitted = draft.trim()
         val submittedAttachments = attachments.toList()
         sendPending = true
-        onSend(submitted, submittedAttachments) { accepted ->
+        val completed: (Boolean) -> Unit = { accepted ->
             sendPending = false
             if (accepted) {
                 if (draft.trim() == submitted) draft = ""
+                replyTargetId = null
                 if (searchQuery.isNotBlank()) {
                     onSearchQueryChange("")
                     searchOpen = false
                 }
             }
         }
+        val replyTarget = replyTargetId
+        if (replyTarget != null) onReplySend(replyTarget, submitted, completed)
+        else onSend(submitted, submittedAttachments, completed)
     }
     LaunchedEffect(autoFocusComposer, conversation.id) {
         if (autoFocusComposer && canSend) {
@@ -191,7 +198,8 @@ fun ConversationScreen(
                 MessageBubble(message, onRetry,
                     onLoadMatrixActions.takeIf { conversation.source == MessageSource.MATRIX },
                     onReact, onEdit, onUnsend,
-                    message.replyToProviderMessageId?.let { repliedId ->
+                    onReply = { replyTargetId = message.id },
+                    replyPreview = message.replyToProviderMessageId?.let { repliedId ->
                         conversation.messages.firstOrNull { it.providerMessageId == repliedId }?.text
                             ?: "Reply to earlier message"
                     })
@@ -288,6 +296,7 @@ fun ConversationScreen(
                     )
                 }
             }
+
         }
 
         AppInputBar(
@@ -308,6 +317,14 @@ fun ConversationScreen(
                     color = palette.onSurfaceVariant,
                     modifier = Modifier.padding(start = 12.dp, bottom = 8.dp),
                 )
+                if (replyTargetId != null) {
+                    Row(Modifier.fillMaxWidth().padding(start = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("Replying to message", color = palette.onSurfaceVariant,
+                            modifier = Modifier.weight(1f))
+                        TextButton(onClick = { replyTargetId = null }) { Text("Cancel") }
+                    }
+                }
                 if (attachments.isNotEmpty()) {
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                         attachments.forEachIndexed { index, attachment ->
@@ -341,7 +358,11 @@ fun ConversationScreen(
                                     } else false
                                 },
                             enabled = canSend,
-                            placeholder = { Text(if (canSend) "Message" else sendAvailability.disabledReason.orEmpty()) },
+                            placeholder = { Text(when {
+                                !canSend -> sendAvailability.disabledReason.orEmpty()
+                                replyTargetId != null && attachments.isNotEmpty() -> "Remove attachments before replying"
+                                else -> "Message"
+                            }) },
                             trailingIcon = {
                                 IconButton(onClick = onAttach, enabled = canSend && !sendPending) {
                                     Icon(
@@ -405,6 +426,7 @@ private fun MessageBubble(
     onReact: (String, String) -> Unit,
     onEdit: (String, String) -> Unit,
     onUnsend: (String) -> Unit,
+    onReply: () -> Unit,
     replyPreview: String?,
 ) {
     val palette = LocalAppTheme.current
@@ -430,7 +452,7 @@ private fun MessageBubble(
                         onClick = { if (message.attachments.isNotEmpty()) attachmentsOpen = true },
                         onLongClick = {
                             onLoadMatrixActions(message.id) { actions ->
-                                if (actions.react || actions.edit || actions.unsend) matrixActions = actions
+                                if (actions.any) matrixActions = actions
                             }
                         },
                     )
@@ -473,6 +495,7 @@ private fun MessageBubble(
         MatrixMessageActionDialog(
             actions = actions, originalText = message.text,
             onReact = { emoji -> onReact(message.id, emoji) },
+            onReply = onReply,
             onEdit = { body -> onEdit(message.id, body) },
             onUnsend = { onUnsend(message.id) },
             onDismiss = { matrixActions = null },

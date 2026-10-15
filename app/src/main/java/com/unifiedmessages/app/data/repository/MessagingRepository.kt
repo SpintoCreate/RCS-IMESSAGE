@@ -18,6 +18,7 @@ import com.unifiedmessages.app.model.Conversation
 import com.unifiedmessages.app.model.MessageSource
 import com.unifiedmessages.app.provider.MessageRoute
 import com.unifiedmessages.app.provider.NetworkType
+import com.unifiedmessages.app.matrix.MatrixProvider
 import com.unifiedmessages.app.sms.PhoneNumbers
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.Instant
@@ -42,6 +43,7 @@ class MessagingRepository @Inject constructor(
     private val database: UnifiedMessagesDatabase,
     private val deletedMessagePreferences: DeletedMessagePreferences,
     private val contactsRepository: ContactsRepository,
+    private val matrixProvider: MatrixProvider,
 ) {
     private val deviceRegion = PhoneNumbers.deviceRegion(context)
 
@@ -97,7 +99,8 @@ class MessagingRepository @Inject constructor(
         database.threadDao().observeUnreadCount(threadId)
 
     suspend fun markRead(threadId: String) = withContext(Dispatchers.IO) {
-        if (database.threadDao().getThread(threadId)?.providerId == "sms") {
+        val providerId = database.threadDao().getThread(threadId)?.providerId
+        if (providerId == "sms") {
             val readValues = ContentValues().apply {
                 put(Telephony.Sms.READ, 1)
                 put(Telephony.Sms.SEEN, 1)
@@ -111,6 +114,10 @@ class MessagingRepository @Inject constructor(
             }
         }
         database.threadDao().markRead(threadId)
+        if (providerId == "matrix") {
+            try { matrixProvider.markRead(threadId) }
+            catch (_: Exception) { /* Local read state remains usable while offline. */ }
+        }
     }
 
     suspend fun setPinned(threadId: String, pinned: Boolean) =

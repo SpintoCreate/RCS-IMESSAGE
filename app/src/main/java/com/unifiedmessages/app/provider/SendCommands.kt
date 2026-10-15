@@ -66,6 +66,10 @@ interface SendCommandProvider {
     suspend fun retry(messageId: String)
 }
 
+interface ReplyCommandProvider : SendCommandProvider {
+    suspend fun reply(threadId: String, repliedToMessageId: String, body: String)
+}
+
 /** Routes by the thread's account and network, and rejects overlapping sends to one thread. */
 @Singleton
 class ProviderSendRouter private constructor(
@@ -113,6 +117,24 @@ class ProviderSendRouter private constructor(
             provider.retry(messageId)
         } finally {
             sendingThreads.remove(route.threadId)
+        }
+    }
+
+    suspend fun reply(threadId: String, repliedToMessageId: String, body: String) {
+        val text = body.trim()
+        require(text.isNotEmpty()) { "Write a reply first." }
+        check(sendingThreads.add(threadId)) { "A message is already sending in this conversation." }
+        try {
+            val route = routes.forThread(threadId) ?: error("Conversation no longer exists.")
+            check(routes.forMessage(repliedToMessageId)?.threadId == threadId) {
+                "The replied-to message is not in this conversation."
+            }
+            val provider = providerFor(route) as? ReplyCommandProvider
+                ?: error("Replies are unavailable for this conversation.")
+            provider.connectionIssue(route)?.let(::error)
+            provider.reply(threadId, repliedToMessageId, text)
+        } finally {
+            sendingThreads.remove(threadId)
         }
     }
 

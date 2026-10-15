@@ -29,6 +29,7 @@ import com.unifiedmessages.app.provider.ProviderThread
 import com.unifiedmessages.app.provider.ReactionAdded
 import com.unifiedmessages.app.provider.ReactionRemoved
 import com.unifiedmessages.app.provider.SendCommandProvider
+import com.unifiedmessages.app.provider.ReplyCommandProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.io.ByteArrayOutputStream
@@ -69,6 +70,7 @@ import org.matrix.rustcomponents.sdk.UploadSource
 import org.matrix.rustcomponents.sdk.SsoHandler
 import org.matrix.rustcomponents.sdk.OAuthConfiguration
 import org.matrix.rustcomponents.sdk.MessageType
+import org.matrix.rustcomponents.sdk.ReceiptType
 import org.matrix.rustcomponents.sdk.MediaSource
 import uniffi.ruma_events.MessageLikeEventType
 
@@ -84,10 +86,13 @@ data class MatrixMessageActions(val react: Boolean = false, val edit: Boolean = 
 class MatrixProvider @Inject constructor(
     @ApplicationContext private val context: Context,
     private val database: UnifiedMessagesDatabase,
-) : MessageProvider, SendCommandProvider {
+) : MessageProvider, ReplyCommandProvider {
     override val id: String = "matrix"
     // Room-level actions stay hidden until their commands and permission checks are wired.
-    override val capabilities = Capabilities()
+    override val capabilities = Capabilities(
+        supportsReactions = true, supportsEdit = true, supportsUnsend = true,
+        supportsReadReceipts = true, supportsAppMessages = false,
+    )
     private val emitted = MutableSharedFlow<MessageEvent>(extraBufferCapacity = 64)
     override val events: Flow<MessageEvent> = emitted.asSharedFlow()
     private val secrets = MatrixSecretStore(context)
@@ -523,6 +528,25 @@ class MatrixProvider @Inject constructor(
         val (accountId, roomId, eventId) = actionTarget(messageId)
         val room = clients[accountId]?.getRoom(roomId) ?: error("Reconnect this Matrix account first.")
         room.use { it.redact(eventId, null) }
+    }
+
+    override suspend fun reply(threadId: String, repliedToMessageId: String, body: String) {
+        require(body.isNotBlank()) { "Write a reply first." }
+        check(availableActions(repliedToMessageId).reply) { "Replies are unavailable for this message." }
+        val thread = database.threadDao().getThread(threadId) ?: error("Conversation no longer exists.")
+        val (accountId, remoteRoomId, eventId) = actionTarget(repliedToMessageId)
+        check(thread.accountId == accountId && thread.providerThreadId == remoteRoomId) {
+            "The replied-to message is not in this conversation."
+        }
+        val timeline = timelines["$accountId|$remoteRoomId"]?.timeline
+            ?: error("Open this Matrix room first.")
+        timeline.sendReply(messageEventContentFromMarkdown(body.trim()), eventId).close()
+    }
+
+    suspend fun markRead(threadId: String) {
+        val thread = database.threadDao().getThread(threadId) ?: return
+        val accountId = thread.accountId ?: return
+        timelines["$accountId|${thread.providerThreadId}"]?.timeline?.markAsRead(ReceiptType.READ)
     }
 
     override suspend fun send(threadId: String, body: String, attachments: List<Uri>) {

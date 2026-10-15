@@ -41,6 +41,7 @@ fun MatrixMessageActionDialog(
     actions: MatrixMessageActions,
     originalText: String,
     onReact: (String) -> Unit,
+    onReply: () -> Unit,
     onEdit: (String) -> Unit,
     onUnsend: () -> Unit,
     onDismiss: () -> Unit,
@@ -102,6 +103,7 @@ fun MatrixMessageActionDialog(
                             }
                         }
                         if (actions.edit) TextButton(onClick = { mode = "edit" }) { Text("Edit") }
+                        if (actions.reply) TextButton(onClick = { onReply(); onDismiss() }) { Text("Reply") }
                         if (actions.unsend) TextButton(onClick = { mode = "unsend" }) { Text("Unsend") }
                         TextButton(onClick = onDismiss) { Text("Cancel") }
                     }
