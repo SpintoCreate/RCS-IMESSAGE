@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 
 @HiltViewModel
 class MessageSendViewModel @Inject constructor(
@@ -23,6 +25,8 @@ class MessageSendViewModel @Inject constructor(
 ) : ViewModel() {
     private val mutableError = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = mutableError.asStateFlow()
+    private val typingJobs = mutableMapOf<String, Job>()
+    private val activeTypingThreads = mutableSetOf<String>()
 
     fun availability(conversation: Conversation, region: String): SendAvailability =
         router.availability(conversation.route, conversation.recipients.ifEmpty { listOf(conversation.title) }, region)
@@ -72,6 +76,23 @@ class MessageSendViewModel @Inject constructor(
     }
 
     fun clearError() { mutableError.value = null }
+
+    fun typing(threadId: String, active: Boolean) {
+        typingJobs.remove(threadId)?.cancel()
+        val sendStart = active && activeTypingThreads.add(threadId)
+        if (!active) activeTypingThreads.remove(threadId)
+        typingJobs[threadId] = viewModelScope.launch {
+            try {
+                if (sendStart || !active) matrixProvider.setTyping(threadId, active)
+                if (active) {
+                    delay(5_000)
+                    matrixProvider.setTyping(threadId, false)
+                    activeTypingThreads.remove(threadId)
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { activeTypingThreads.remove(threadId) }
+        }
+    }
 
     fun loadMatrixActions(messageId: String, onLoaded: (MatrixMessageActions) -> Unit) {
         viewModelScope.launch {

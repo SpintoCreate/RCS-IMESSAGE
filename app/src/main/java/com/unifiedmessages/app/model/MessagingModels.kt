@@ -45,6 +45,7 @@ data class Conversation(
     val recipients: List<String> = emptyList(),
     /** Cached contact thumbnail, when this is a one-to-one conversation. */
     val photoUri: String? = null,
+    val typingUsers: List<String> = emptyList(),
 ) {
     val preview: String get() = previewText ?: messages.lastOrNull()?.text.orEmpty()
 }

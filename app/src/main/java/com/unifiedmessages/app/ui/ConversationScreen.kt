@@ -101,6 +101,7 @@ fun ConversationScreen(
     onEdit: (String, String) -> Unit = { _, _ -> },
     onUnsend: (String) -> Unit = {},
     onReplySend: (String, String, (Boolean) -> Unit) -> Unit = { _, _, done -> done(false) },
+    onDraftTyping: (String, Boolean) -> Unit = { _, _ -> },
     smsAccessBanner: String? = null,
     onRequestSmsAccess: () -> Unit = {},
     onBack: () -> Unit,
@@ -118,6 +119,11 @@ fun ConversationScreen(
     val composerFocusRequester = remember { FocusRequester() }
     val listState = rememberLazyListState()
     val hasPayload = draft.isNotBlank() || attachments.isNotEmpty()
+    LaunchedEffect(draft, conversation.id) {
+        if (conversation.source == MessageSource.MATRIX) {
+            onDraftTyping(conversation.id, draft.isNotBlank())
+        }
+    }
     fun submit() {
         if (!canSend || !hasPayload || sendPending ||
             (replyTargetId != null && attachments.isNotEmpty())) return
@@ -246,6 +252,13 @@ fun ConversationScreen(
                     Spacer(Modifier.height(4.dp))
                     if (conversation.source == MessageSource.SMS || conversation.source == MessageSource.MATRIX) {
                         SourceBadge(source = conversation.source.label)
+                    }
+                    if (conversation.typingUsers.isNotEmpty()) {
+                        Text(if (conversation.typingUsers.size == 1)
+                            "${conversation.typingUsers.first().substringBefore(':').removePrefix("@")}" + " is typing…"
+                            else "${conversation.typingUsers.size} people are typing…",
+                            color = palette.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelSmall)
                     }
                 }
 

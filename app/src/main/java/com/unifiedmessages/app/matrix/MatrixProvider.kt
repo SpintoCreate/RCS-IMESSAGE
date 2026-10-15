@@ -75,6 +75,8 @@ import org.matrix.rustcomponents.sdk.OAuthConfiguration
 import org.matrix.rustcomponents.sdk.MessageType
 import org.matrix.rustcomponents.sdk.ReceiptType
 import org.matrix.rustcomponents.sdk.TypingNotificationsListener
+import org.matrix.rustcomponents.sdk.ClientDelegate
+import uniffi.matrix_sdk_common.BackgroundTaskFailureReason
 import org.matrix.rustcomponents.sdk.MediaSource
 import uniffi.ruma_events.MessageLikeEventType
 
@@ -101,6 +103,7 @@ class MatrixProvider @Inject constructor(
     override val events: Flow<MessageEvent> = emitted.asSharedFlow()
     private val secrets = MatrixSecretStore(context)
     private val clients = ConcurrentHashMap<String, Client>()
+    private val authDelegates = ConcurrentHashMap<String, TaskHandle>()
     private val reducer = MessageEventReducer(database)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private data class RoomPermissions(val send: Boolean, val react: Boolean, val redactOwn: Boolean)
@@ -167,6 +170,7 @@ class MatrixProvider @Inject constructor(
                 )
                 database.providerAccountDao().upsert(account)
                 clients.put(account.id, client)?.close()
+                attachAuthDelegate(account.id, client)
                 account
             } catch (error: Exception) {
                 client.close()
@@ -237,6 +241,7 @@ class MatrixProvider @Inject constructor(
             )
             database.providerAccountDao().upsert(account)
             clients.put(account.id, pending.client)?.close()
+            attachAuthDelegate(account.id, pending.client)
             account
         } catch (error: Exception) {
             pending.client.close()
@@ -250,6 +255,7 @@ class MatrixProvider @Inject constructor(
     suspend fun restoreAccounts(): List<ProviderAccountEntity> = withContext(Dispatchers.IO) {
         database.providerAccountDao().all(id).map { account ->
             if (clients.containsKey(account.id)) return@map account
+            if (account.connectionState == "AUTH_EXPIRED") return@map account
             val reference = account.credentialRef
             val record = reference?.let(secrets::read)
             if (reference == null || record == null) {
@@ -259,6 +265,7 @@ class MatrixProvider @Inject constructor(
                 try {
                     client.restoreSession(record.session)
                     clients[account.id] = client
+                    attachAuthDelegate(account.id, client)
                     account.copy(connectionState = "CONNECTED").also { database.providerAccountDao().upsert(it) }
                 } catch (_: Exception) {
                     client.close()
@@ -270,6 +277,7 @@ class MatrixProvider @Inject constructor(
 
     suspend fun logout(accountId: String) = withContext(Dispatchers.IO) {
         val account = database.providerAccountDao().get(accountId) ?: return@withContext
+        authDelegates.remove(accountId)?.close()
         timelines.keys.filter { it.startsWith("$accountId|") }.forEach { key ->
             timelines.remove(key)?.let { it.listener.close(); it.typingListener.close(); it.timeline.close() }
         }
@@ -285,6 +293,30 @@ class MatrixProvider @Inject constructor(
             account.credentialRef?.let(secrets::remove)
             database.providerAccountDao().upsert(account.copy(connectionState = "SIGNED_OUT", credentialRef = null))
         }
+    }
+
+    private fun attachAuthDelegate(accountId: String, client: Client) {
+        val handle = client.setDelegate(object : ClientDelegate {
+            override fun didReceiveAuthError(isSoftLogout: Boolean) {
+                scope.launch {
+                    val account = database.providerAccountDao().get(accountId) ?: return@launch
+                    database.providerAccountDao().upsert(account.copy(connectionState = "AUTH_EXPIRED"))
+                    timelines.keys.filter { it.startsWith("$accountId|") }.forEach { key ->
+                        timelines.remove(key)?.let { it.listener.close(); it.typingListener.close(); it.timeline.close() }
+                    }
+                    sendHandles.keys.filter { it.startsWith("$accountId|") }.forEach { key ->
+                        sendHandles.remove(key)?.close()
+                    }
+                    authDelegates.remove(accountId)?.close()
+                    clients.remove(accountId)?.close()
+                }
+            }
+
+            override fun onBackgroundTaskErrorReport(
+                taskName: String, error: BackgroundTaskFailureReason,
+            ) = Unit
+        })
+        if (handle != null) authDelegates.put(accountId, handle)?.close()
     }
 
     /** SDK sync tokens live in its encrypted store; Room also records each completed batch cursor. */
@@ -581,6 +613,13 @@ class MatrixProvider @Inject constructor(
         val thread = database.threadDao().getThread(threadId) ?: return
         val accountId = thread.accountId ?: return
         timelines["$accountId|${thread.providerThreadId}"]?.timeline?.markAsRead(ReceiptType.READ)
+    }
+
+    suspend fun setTyping(threadId: String, typing: Boolean) {
+        val thread = database.threadDao().getThread(threadId) ?: return
+        val accountId = thread.accountId ?: return
+        val room = clients[accountId]?.getRoom(thread.providerThreadId) ?: return
+        room.use { it.typingNotice(typing) }
     }
 
     override suspend fun send(threadId: String, body: String, attachments: List<Uri>) {

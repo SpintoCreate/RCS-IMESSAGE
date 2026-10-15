@@ -33,6 +33,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -91,9 +93,23 @@ class MessagingRepository @Inject constructor(
             deletedMessagePreferences.showSenderDeletedMessages,
         ) { thread, messages, attachments, participants, showSenderDeleted ->
             thread?.toConversation(messages, attachments, participants.map { it.address }, showSenderDeleted)
+        }.combine(observeActiveTyping(threadId)) { conversation, typing ->
+            conversation?.copy(typingUsers = typing)
         }.combine(contactsRepository.contacts) { conversation, contacts ->
             conversation?.withContacts(contacts.associateBy { it.normalizedNumber })
         }
+
+    private fun observeActiveTyping(threadId: String): Flow<List<String>> = combine(
+        database.typingStateDao().observe(threadId),
+        flow {
+            while (true) {
+                emit(System.currentTimeMillis())
+                delay(5_000)
+            }
+        },
+    ) { states, now ->
+        states.filter { it.isTyping && it.updatedAt >= now - 15_000L }.map { it.actorAddress }
+    }
 
     fun observeUnreadCount(threadId: String): Flow<Int> =
         database.threadDao().observeUnreadCount(threadId)

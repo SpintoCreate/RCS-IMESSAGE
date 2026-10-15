@@ -70,6 +70,10 @@ fun MatrixAccountsScreen(
                     Text(account.remoteSelfId ?: account.id, color = theme.onSurface)
                     Text(account.connectionState.lowercase().replaceFirstChar { it.titlecase() },
                         color = theme.onSurfaceVariant)
+                    if (account.connectionState == "AUTH_EXPIRED") {
+                        Text("Your Matrix sign-in expired. Sign in again with this homeserver and account.",
+                            color = theme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                    }
                     if (account.connectionState == "CONNECTED") {
                         val security = state.security[account.id]
                         if (security?.verification == "UNVERIFIED") {
