@@ -65,6 +65,7 @@ dependencies {
     kapt("com.google.dagger:hilt-android-compiler:2.57.2")
     implementation("androidx.hilt:hilt-navigation-compose:1.3.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4")
+    implementation("androidx.work:work-runtime-ktx:2.10.5")
     implementation("dev.chrisbanes.haze:haze:1.6.10")
     // PDU encoding/persistence only; platform SmsManager handles MMS transfer and callbacks.
     implementation("com.klinkerapps:android-smsmms:5.2.6")

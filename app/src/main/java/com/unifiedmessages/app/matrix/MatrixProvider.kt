@@ -108,6 +108,9 @@ class MatrixProvider @Inject constructor(
 
     fun accounts(): Flow<List<ProviderAccountEntity>> = database.providerAccountDao().observe(id)
 
+    suspend fun previousSyncAt(accountId: String): Long? =
+        database.providerSyncDao().cursor("$accountId:sync")?.updatedAt
+
     fun securityStatus(accountId: String): MatrixSecurityStatus {
         val client = clients[accountId] ?: return MatrixSecurityStatus("UNKNOWN", "UNKNOWN")
         return client.encryption().use { encryption ->

@@ -5,12 +5,14 @@ import android.app.role.RoleManager
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Telephony
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.edit
+import androidx.core.content.ContextCompat
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
@@ -148,6 +150,9 @@ fun UnifiedMessagesApp(
     val contactsPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { contactsViewModel.refresh() }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
     val mediaPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments(),
     ) { picked ->
@@ -184,6 +189,17 @@ fun UnifiedMessagesApp(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(Unit) { smsConnectionViewModel.refresh() }
+    LaunchedEffect(matrixAccountState.accounts, welcomeSeen) {
+        if (welcomeSeen && Build.VERSION.SDK_INT >= 33 &&
+            matrixAccountState.accounts.any { it.connectionState == "CONNECTED" } &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED &&
+            !preferences.getBoolean("matrix_notification_permission_asked_v1", false)
+        ) {
+            preferences.edit { putBoolean("matrix_notification_permission_asked_v1", true) }
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     LaunchedEffect(matrixCallbackUrl) {
         if (matrixCallbackUrl != null) {
             matrixAccountsOpen = true
