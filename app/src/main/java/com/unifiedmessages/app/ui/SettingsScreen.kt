@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -66,6 +67,7 @@ fun SettingsScreen(
     onAccentChange: (Int) -> Unit,
     showSenderDeletedMessages: Boolean,
     onShowSenderDeletedMessagesChange: (Boolean) -> Unit,
+    onMatrixAccounts: () -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -191,6 +193,19 @@ fun SettingsScreen(
                     onCheckedChange = onShowSenderDeletedMessagesChange,
                     modifier = Modifier.semantics { contentDescription = "Show messages deleted by sender" },
                 )
+            }
+        }
+
+        AppearanceHeading("ACCOUNTS", modifier = Modifier.padding(top = 35.dp))
+        StyleSurface(
+            modifier = Modifier.fillMaxWidth().clickable(onClick = onMatrixAccounts),
+            shape = RoundedCornerShape(22.dp),
+            contentPadding = PaddingValues(20.dp),
+        ) {
+            Column {
+                Text("Matrix accounts", style = MaterialTheme.typography.titleMedium, color = theme.onSurface)
+                Text("Connect a homeserver account", style = MaterialTheme.typography.bodyMedium,
+                    color = theme.onSurfaceVariant)
             }
         }
 

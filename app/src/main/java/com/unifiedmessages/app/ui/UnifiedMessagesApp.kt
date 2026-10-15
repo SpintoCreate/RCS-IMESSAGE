@@ -49,6 +49,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.unifiedmessages.app.data.AppearanceRepository
 import com.unifiedmessages.app.data.repository.DeletedMessagePreferences
+import com.unifiedmessages.app.model.MessageSource
 import com.unifiedmessages.app.ui.components.AppBackdrop
 import com.unifiedmessages.app.ui.components.AppMessageDialog
 import com.unifiedmessages.app.ui.components.DotMatrixAccent
@@ -62,6 +63,7 @@ import com.unifiedmessages.app.ui.viewmodel.ConversationViewModel
 import com.unifiedmessages.app.ui.viewmodel.ContactsViewModel
 import com.unifiedmessages.app.ui.viewmodel.InboxViewModel
 import com.unifiedmessages.app.ui.viewmodel.MessageSendViewModel
+import com.unifiedmessages.app.ui.viewmodel.MatrixAccountViewModel
 import com.unifiedmessages.app.ui.viewmodel.SmsConnectionViewModel
 import com.unifiedmessages.app.sms.PhoneNumbers
 import dagger.hilt.EntryPoint
@@ -90,11 +92,13 @@ fun UnifiedMessagesApp(
     val conversationViewModel: ConversationViewModel = hiltViewModel()
     val smsConnectionViewModel: SmsConnectionViewModel = hiltViewModel()
     val messageSendViewModel: MessageSendViewModel = hiltViewModel()
+    val matrixAccountViewModel: MatrixAccountViewModel = hiltViewModel()
     val contactsViewModel: ContactsViewModel = hiltViewModel()
     val inboxState by inboxViewModel.uiState.collectAsState()
     val conversationState by conversationViewModel.uiState.collectAsState()
     val smsState by smsConnectionViewModel.uiState.collectAsState()
     val sendError by messageSendViewModel.error.collectAsState()
+    val matrixAccountState by matrixAccountViewModel.state.collectAsState()
     val contacts by contactsViewModel.contacts.collectAsState()
     val hasContactsPermission by contactsViewModel.hasPermission.collectAsState()
     val deletedMessagePreferences = remember(context) {
@@ -122,6 +126,7 @@ fun UnifiedMessagesApp(
     var focusComposerId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedAttachments by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
+    var matrixAccountsOpen by rememberSaveable { mutableStateOf(false) }
     var newMessageOpen by rememberSaveable { mutableStateOf(false) }
     var newMessageInitialRecipients by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
     val smsPermissions = remember {
@@ -220,13 +225,14 @@ fun UnifiedMessagesApp(
         }
     }
 
-    BackHandler(enabled = newMessageOpen || settingsOpen || selectedId != null) {
+    BackHandler(enabled = newMessageOpen || matrixAccountsOpen || settingsOpen || selectedId != null) {
         when {
             newMessageOpen -> {
                 newMessageOpen = false
                 newMessageInitialRecipients = emptyList()
                 selectedAttachments = emptyList()
             }
+            matrixAccountsOpen -> matrixAccountsOpen = false
             settingsOpen -> settingsOpen = false
             else -> {
                 selectedId = null
@@ -317,6 +323,14 @@ fun UnifiedMessagesApp(
                             },
                             modifier = Modifier.fillMaxSize(),
                         )
+                    } else if (matrixAccountsOpen) {
+                        MatrixAccountsScreen(
+                            state = matrixAccountState,
+                            onDiscover = matrixAccountViewModel::discover,
+                            onPasswordLogin = matrixAccountViewModel::loginPassword,
+                            onLogout = matrixAccountViewModel::logout,
+                            onBack = { matrixAccountsOpen = false },
+                        )
                     } else if (settingsOpen) {
                         SettingsScreen(
                             settings = appearance,
@@ -369,6 +383,7 @@ fun UnifiedMessagesApp(
                             onShowSenderDeletedMessagesChange = { show ->
                                 scope.launch { deletedMessagePreferences.setShowSenderDeletedMessages(show) }
                             },
+                            onMatrixAccounts = { matrixAccountsOpen = true },
                             onBack = { settingsOpen = false },
                             modifier = Modifier.fillMaxSize(),
                         )
@@ -412,7 +427,7 @@ fun UnifiedMessagesApp(
                                         onAttach = { mediaPicker.launch(arrayOf("image/*", "video/*", "audio/*")) },
                                         onRemoveAttachment = { file -> selectedAttachments = selectedAttachments - file },
                                         onRetry = messageSendViewModel::retry,
-                                        smsAccessBanner = smsAccessBanner,
+                                        smsAccessBanner = smsAccessBanner.takeIf { selected.source == MessageSource.SMS },
                                         onRequestSmsAccess = requestSmsAccess,
                                         onBack = { selectedId = null },
                                         showBack = false,
@@ -464,7 +479,7 @@ fun UnifiedMessagesApp(
                                     onAttach = { mediaPicker.launch(arrayOf("image/*", "video/*", "audio/*")) },
                                     onRemoveAttachment = { file -> selectedAttachments = selectedAttachments - file },
                                     onRetry = messageSendViewModel::retry,
-                                    smsAccessBanner = smsAccessBanner,
+                                    smsAccessBanner = smsAccessBanner.takeIf { conversation.source == MessageSource.SMS },
                                     onRequestSmsAccess = requestSmsAccess,
                                     onBack = { selectedId = null },
                                     showBack = true,
