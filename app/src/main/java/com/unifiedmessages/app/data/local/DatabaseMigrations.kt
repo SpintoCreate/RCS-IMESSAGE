@@ -70,3 +70,17 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
         db.execSQL("ALTER TABLE `messages` ADD COLUMN `replyToProviderMessageId` TEXT")
     }
 }
+
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("""CREATE TABLE IF NOT EXISTS `read_receipts` (
+            `id` TEXT NOT NULL, `messageId` TEXT NOT NULL, `actorAddress` TEXT NOT NULL,
+            `readAt` INTEGER NOT NULL, PRIMARY KEY(`id`))""")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_read_receipts_messageId` ON `read_receipts` (`messageId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_read_receipts_actorAddress` ON `read_receipts` (`actorAddress`)")
+        db.execSQL("""CREATE TABLE IF NOT EXISTS `typing_states` (
+            `id` TEXT NOT NULL, `threadId` TEXT NOT NULL, `actorAddress` TEXT NOT NULL,
+            `isTyping` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))""")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_typing_states_threadId` ON `typing_states` (`threadId`)")
+    }
+}

@@ -11,6 +11,8 @@ import com.unifiedmessages.app.provider.ProviderParticipant
 import com.unifiedmessages.app.provider.ProviderThread
 import com.unifiedmessages.app.provider.ReactionAdded
 import com.unifiedmessages.app.provider.ReactionRemoved
+import com.unifiedmessages.app.provider.ReadReceiptObserved
+import com.unifiedmessages.app.provider.TypingChanged
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -69,6 +71,29 @@ class MessageEventReducerTest {
         assertTrue(reducer.apply(MessageReceived(providerId, "reply-enriched", 121L, thread,
             reply.copy(replyToProviderMessageId = null))))
         assertEquals("sms:42", store.messages.values.single().replyToProviderMessageId)
+    }
+
+    @Test fun earlyReadReceiptWaitsForItsMessageAndThenReplays() = runBlocking {
+        val store = InMemoryMessageEventStore()
+        val reducer = MessageEventReducer(store)
+        val receipt = ReadReceiptObserved(providerId, "read-1", 150L,
+            "sms:42", "+15551234567")
+        assertFalse(reducer.apply(receipt))
+        assertEquals(1, store.pending.size)
+        assertTrue(reducer.apply(MessageReceived(providerId, "receive", 100L, thread, message)))
+        assertEquals(1, store.receipts.size)
+        assertEquals(0, store.pending.size)
+        assertEquals(150L, store.receipts.values.single().readAt)
+    }
+
+    @Test fun oldTypingUpdateCannotOverrideNewerStoppedState() = runBlocking {
+        val store = InMemoryMessageEventStore()
+        val reducer = MessageEventReducer(store)
+        reducer.apply(TypingChanged(providerId, "typing-on", 200L, "17", "Alex", true))
+        reducer.apply(TypingChanged(providerId, "typing-off", 210L, "17", "Alex", false))
+        reducer.apply(TypingChanged(providerId, "typing-late", 205L, "17", "Alex", true))
+        assertFalse(store.typing.values.single().isTyping)
+        assertEquals(210L, store.typing.values.single().updatedAt)
     }
 
     @Test fun localEchoKeepsOneRowAfterServerIdAndReplaysEarlyRelation() = runBlocking {
@@ -302,6 +327,8 @@ private class InMemoryMessageEventStore : MessageEventStore {
     val deletions = mutableListOf<MessageDeletionEntity>()
     val pending = linkedMapOf<String, PendingProviderEventEntity>()
     val mappings = linkedMapOf<String, RemoteIdMappingEntity>()
+    val receipts = linkedMapOf<String, ReadReceiptEntity>()
+    val typing = linkedMapOf<String, TypingStateEntity>()
 
     override suspend fun <T> transaction(block: suspend () -> T): T = block()
     override suspend fun hasEvent(id: String): Boolean = events.containsKey(id)
@@ -329,4 +356,7 @@ private class InMemoryMessageEventStore : MessageEventStore {
     override suspend fun insertMapping(mapping: RemoteIdMappingEntity) { mappings.putIfAbsent(mapping.id, mapping) }
     override suspend fun getMapping(accountId: String, entityType: String, remoteId: String): RemoteIdMappingEntity? =
         mappings[ProviderIds.mapping(accountId, entityType, remoteId)]
+    override suspend fun insertReadReceipt(receipt: ReadReceiptEntity) { receipts.putIfAbsent(receipt.id, receipt) }
+    override suspend fun getTypingState(id: String): TypingStateEntity? = typing[id]
+    override suspend fun upsertTypingState(state: TypingStateEntity) { typing[state.id] = state }
 }

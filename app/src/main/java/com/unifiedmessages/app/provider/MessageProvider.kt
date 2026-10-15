@@ -129,3 +129,22 @@ data class DeliveryUpdated(
     val status: DeliveryStatus,
     override val accountId: String = "$providerId:local",
 ) : MessageEvent
+
+data class ReadReceiptObserved(
+    override val providerId: String,
+    override val eventId: String,
+    override val occurredAt: Long,
+    val providerMessageId: String,
+    val actorAddress: String,
+    override val accountId: String = "$providerId:local",
+) : MessageEvent
+
+data class TypingChanged(
+    override val providerId: String,
+    override val eventId: String,
+    override val occurredAt: Long,
+    val providerThreadId: String,
+    val actorAddress: String,
+    val isTyping: Boolean,
+    override val accountId: String = "$providerId:local",
+) : MessageEvent

@@ -179,6 +179,12 @@ interface MessageDao {
     @Query("SELECT * FROM reactions WHERE messageId = :messageId AND removedAt IS NULL")
     suspend fun getActiveReactions(messageId: String): List<ReactionEntity>
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertReadReceipt(receipt: ReadReceiptEntity): Long
+
+    @Query("SELECT * FROM read_receipts WHERE messageId = :messageId ORDER BY readAt DESC")
+    fun observeReadReceipts(messageId: String): Flow<List<ReadReceiptEntity>>
+
     @Update
     suspend fun updateReaction(reaction: ReactionEntity)
 
@@ -249,6 +255,18 @@ interface ProviderSyncDao {
     suspend fun deletePending(id: String)
 }
 
+@Dao
+interface TypingStateDao {
+    @Query("SELECT * FROM typing_states WHERE id = :id LIMIT 1")
+    suspend fun get(id: String): TypingStateEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(state: TypingStateEntity)
+
+    @Query("SELECT * FROM typing_states WHERE threadId = :threadId")
+    fun observe(threadId: String): Flow<List<TypingStateEntity>>
+}
+
 @Database(
     entities = [
         ThreadEntity::class,
@@ -256,6 +274,8 @@ interface ProviderSyncDao {
         MessageEntity::class,
         AttachmentEntity::class,
         ReactionEntity::class,
+        ReadReceiptEntity::class,
+        TypingStateEntity::class,
         MessageEditEntity::class,
         MessageDeletionEntity::class,
         AppliedProviderEventEntity::class,
@@ -265,7 +285,7 @@ interface ProviderSyncDao {
         SyncCursorEntity::class,
         PendingProviderEventEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 @TypeConverters(MessageTypeConverters::class)
@@ -276,4 +296,5 @@ abstract class UnifiedMessagesDatabase : RoomDatabase() {
     abstract fun contactsDao(): ContactsDao
     abstract fun providerAccountDao(): ProviderAccountDao
     abstract fun providerSyncDao(): ProviderSyncDao
+    abstract fun typingStateDao(): TypingStateDao
 }

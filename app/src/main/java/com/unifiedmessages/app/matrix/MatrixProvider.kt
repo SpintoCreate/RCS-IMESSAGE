@@ -28,6 +28,8 @@ import com.unifiedmessages.app.provider.ProviderParticipant
 import com.unifiedmessages.app.provider.ProviderThread
 import com.unifiedmessages.app.provider.ReactionAdded
 import com.unifiedmessages.app.provider.ReactionRemoved
+import com.unifiedmessages.app.provider.ReadReceiptObserved
+import com.unifiedmessages.app.provider.TypingChanged
 import com.unifiedmessages.app.provider.SendCommandProvider
 import com.unifiedmessages.app.provider.ReplyCommandProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -36,6 +38,7 @@ import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -71,6 +74,7 @@ import org.matrix.rustcomponents.sdk.SsoHandler
 import org.matrix.rustcomponents.sdk.OAuthConfiguration
 import org.matrix.rustcomponents.sdk.MessageType
 import org.matrix.rustcomponents.sdk.ReceiptType
+import org.matrix.rustcomponents.sdk.TypingNotificationsListener
 import org.matrix.rustcomponents.sdk.MediaSource
 import uniffi.ruma_events.MessageLikeEventType
 
@@ -101,6 +105,7 @@ class MatrixProvider @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private data class RoomPermissions(val send: Boolean, val react: Boolean, val redactOwn: Boolean)
     private data class RoomTimeline(val timeline: Timeline, val listener: TaskHandle,
+        val typingListener: TaskHandle,
         val permissions: RoomPermissions)
     private val timelines = ConcurrentHashMap<String, RoomTimeline>()
     private data class MessageFlags(val isOwn: Boolean, val editable: Boolean, val canReply: Boolean)
@@ -266,7 +271,7 @@ class MatrixProvider @Inject constructor(
     suspend fun logout(accountId: String) = withContext(Dispatchers.IO) {
         val account = database.providerAccountDao().get(accountId) ?: return@withContext
         timelines.keys.filter { it.startsWith("$accountId|") }.forEach { key ->
-            timelines.remove(key)?.let { it.listener.close(); it.timeline.close() }
+            timelines.remove(key)?.let { it.listener.close(); it.typingListener.close(); it.timeline.close() }
         }
         sendHandles.keys.filter { it.startsWith("$accountId|") }.forEach { key ->
             sendHandles.remove(key)?.close()
@@ -326,8 +331,26 @@ class MatrixProvider @Inject constructor(
                         }
                     }
                 })
-                val existing = timelines.putIfAbsent(key, RoomTimeline(timeline, listener, permissions))
-                if (existing != null) { listener.close(); timeline.close() }
+                val priorTyping = AtomicReference(emptySet<String>())
+                val typingListener = room.subscribeToTypingNotifications(object : TypingNotificationsListener {
+                    override fun call(typingUserIds: List<String>) {
+                        val current = typingUserIds.toSet() - accountId.removePrefix("matrix:")
+                        val old = priorTyping.getAndSet(current)
+                        val now = System.currentTimeMillis()
+                        scope.launch {
+                            ((current - old).map { it to true } + (old - current).map { it to false })
+                                .forEach { (actor, active) ->
+                                    val changed = TypingChanged(id,
+                                        "typing:$roomId:$actor:$now:$active", now,
+                                        roomId, actor, active, accountId)
+                                    if (reducer.apply(changed)) emitted.emit(changed)
+                                }
+                        }
+                    }
+                })
+                val existing = timelines.putIfAbsent(key,
+                    RoomTimeline(timeline, listener, typingListener, permissions))
+                if (existing != null) { listener.close(); typingListener.close(); timeline.close() }
             }
         }
         database.providerSyncDao().upsertCursor(
@@ -354,9 +377,11 @@ class MatrixProvider @Inject constructor(
         val editable: Boolean = false,
         val canReply: Boolean = false,
         val replyToEventId: String? = null,
+        val readReceipts: List<ReceiptSnapshot> = emptyList(),
     )
 
     private data class MediaSnapshot(val sourceJson: String, val filename: String, val mimeType: String)
+    private data class ReceiptSnapshot(val actor: String, val timestamp: Long)
 
     private fun snapshot(item: TimelineItem): Snapshot? {
         val event = item.asEvent() ?: return null
@@ -394,7 +419,10 @@ class MatrixProvider @Inject constructor(
             media, event.reactions.flatMap { reaction ->
                 reaction.senders.map { sender -> MatrixObservedReaction(sender.senderId, reaction.key,
                     sender.timestamp.toLong()) }
-            }, event.isEditable, event.canBeRepliedTo, content.content.inReplyTo?.eventId())
+            }, event.isEditable, event.canBeRepliedTo, content.content.inReplyTo?.eventId(),
+            event.readReceipts.map { (actor, receipt) ->
+                ReceiptSnapshot(actor, receipt.timestamp?.toLong() ?: event.timestamp.toLong())
+            })
     }
 
     private suspend fun ingest(accountId: String, roomId: String, title: String, item: Snapshot) {
@@ -445,6 +473,12 @@ class MatrixProvider @Inject constructor(
                 if (reducer.apply(removed)) emitted.emit(removed)
             }
             }
+        }
+        item.readReceipts.forEach { receipt ->
+            val observed = ReadReceiptObserved(id,
+                "receipt:$roomId:${item.eventId}:${receipt.actor}:${receipt.timestamp}",
+                receipt.timestamp, item.eventId, receipt.actor, accountId)
+            if (reducer.apply(observed)) emitted.emit(observed)
         }
         val event: MessageEvent = when {
             item.redacted -> MessageDeleted(id, "redacted:$roomId:${item.eventId}", item.timestamp,

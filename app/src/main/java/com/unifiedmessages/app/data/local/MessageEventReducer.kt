@@ -11,6 +11,8 @@ import com.unifiedmessages.app.provider.ProviderMessage
 import com.unifiedmessages.app.provider.ProviderThread
 import com.unifiedmessages.app.provider.ReactionAdded
 import com.unifiedmessages.app.provider.ReactionRemoved
+import com.unifiedmessages.app.provider.ReadReceiptObserved
+import com.unifiedmessages.app.provider.TypingChanged
 import java.io.ByteArrayOutputStream
 import java.io.ByteArrayInputStream
 import java.io.DataInputStream
@@ -69,6 +71,9 @@ interface MessageEventStore {
     suspend fun deletePending(id: String)
     suspend fun insertMapping(mapping: RemoteIdMappingEntity)
     suspend fun getMapping(accountId: String, entityType: String, remoteId: String): RemoteIdMappingEntity?
+    suspend fun insertReadReceipt(receipt: ReadReceiptEntity)
+    suspend fun getTypingState(id: String): TypingStateEntity?
+    suspend fun upsertTypingState(state: TypingStateEntity)
 }
 
 class RoomMessageEventStore(private val database: UnifiedMessagesDatabase) : MessageEventStore {
@@ -106,6 +111,13 @@ class RoomMessageEventStore(private val database: UnifiedMessagesDatabase) : Mes
     }
     override suspend fun getMapping(accountId: String, entityType: String, remoteId: String): RemoteIdMappingEntity? =
         database.providerSyncDao().mapping(accountId, entityType, remoteId)
+    override suspend fun insertReadReceipt(receipt: ReadReceiptEntity) {
+        messages.insertReadReceipt(receipt)
+    }
+    override suspend fun getTypingState(id: String): TypingStateEntity? = database.typingStateDao().get(id)
+    override suspend fun upsertTypingState(state: TypingStateEntity) {
+        database.typingStateDao().upsert(state)
+    }
 }
 
 /** Applies each provider event atomically. Unknown targets remain retryable (the event is not acknowledged). */
@@ -215,6 +227,25 @@ class MessageEventReducer(private val store: MessageEventStore) {
                     )
                     true
                 }
+            }
+            is ReadReceiptObserved -> {
+                val messageId = localMessageId(event.providerId, event.accountId, event.providerMessageId)
+                if (store.getMessage(messageId) == null) false else {
+                    store.insertReadReceipt(ReadReceiptEntity(eventKey, messageId,
+                        event.actorAddress, event.occurredAt))
+                    true
+                }
+            }
+            is TypingChanged -> {
+                val threadId = ProviderIds.thread(identity, event.providerThreadId)
+                val typingId = ProviderIds.mapping(event.accountId, "typing",
+                    "${event.providerThreadId}|${event.actorAddress}")
+                val previous = store.getTypingState(typingId)
+                if (previous == null || event.occurredAt >= previous.updatedAt) {
+                    store.upsertTypingState(TypingStateEntity(typingId, threadId,
+                        event.actorAddress, event.isTyping, event.occurredAt))
+                }
+                true
             }
         }
         if (applied) {
@@ -408,6 +439,7 @@ private object PendingEventCodec {
             is ReactionRemoved -> event.providerMessageId
             is MessageEdited -> event.providerMessageId
             is MessageDeleted -> event.providerMessageId
+            is ReadReceiptObserved -> event.providerMessageId
             else -> return null
         }
         val bytes = ByteArrayOutputStream().also { buffer ->
@@ -424,6 +456,7 @@ private object PendingEventCodec {
                         if (event.newBody != null) out.writeUTF(event.newBody)
                     }
                     is MessageDeleted -> out.writeBoolean(event.bySender)
+                    is ReadReceiptObserved -> out.writeUTF(event.actorAddress)
                     else -> Unit
                 }
             }
@@ -433,6 +466,7 @@ private object PendingEventCodec {
             is ReactionRemoved -> "ReactionRemoved"
             is MessageEdited -> "MessageEdited"
             is MessageDeleted -> "MessageDeleted"
+            is ReadReceiptObserved -> "ReadReceiptObserved"
             else -> error("Unsupported pending event")
         }
         return Triple(target, type, Base64.getEncoder().encodeToString(bytes))
@@ -456,6 +490,10 @@ private object PendingEventCodec {
                 )
                 "MessageDeleted" -> MessageDeleted(
                     pending.providerId, pending.eventId, pending.occurredAt, remoteId, input.readBoolean(), pending.accountId,
+                )
+                "ReadReceiptObserved" -> ReadReceiptObserved(
+                    pending.providerId, pending.eventId, pending.occurredAt, remoteId,
+                    input.readUTF(), pending.accountId,
                 )
                 else -> error("Unknown pending event type: ${pending.eventType}")
             }

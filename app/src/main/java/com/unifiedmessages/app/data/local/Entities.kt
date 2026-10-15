@@ -154,6 +154,25 @@ data class ReactionEntity(
     val removedAt: Long? = null,
 )
 
+/** Each remote read event is retained for audit and timeline state. */
+@Entity(tableName = "read_receipts", indices = [Index("messageId"), Index("actorAddress")])
+data class ReadReceiptEntity(
+    @PrimaryKey val id: String,
+    val messageId: String,
+    val actorAddress: String,
+    val readAt: Long,
+)
+
+/** The latest ephemeral typing status; clients ignore rows older than the SDK timeout. */
+@Entity(tableName = "typing_states", indices = [Index("threadId")])
+data class TypingStateEntity(
+    @PrimaryKey val id: String,
+    val threadId: String,
+    val actorAddress: String,
+    val isTyping: Boolean,
+    val updatedAt: Long,
+)
+
 @Entity(
     tableName = "message_edits",
     foreignKeys = [ForeignKey(entity = MessageEntity::class, parentColumns = ["id"], childColumns = ["messageId"])],
