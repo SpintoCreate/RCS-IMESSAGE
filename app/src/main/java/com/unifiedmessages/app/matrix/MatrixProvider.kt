@@ -7,6 +7,9 @@ import android.util.Log
 import androidx.core.content.FileProvider
 import android.util.Base64
 import com.unifiedmessages.app.data.local.ProviderAccountEntity
+import com.unifiedmessages.app.data.local.BridgeRoomEntity
+import com.unifiedmessages.app.data.local.ThreadEntity
+import com.unifiedmessages.app.data.local.RemoteIdMappingEntity
 import com.unifiedmessages.app.data.local.ContentType
 import com.unifiedmessages.app.data.local.DeliveryStatus
 import com.unifiedmessages.app.data.local.MessageEventReducer
@@ -79,6 +82,7 @@ import org.matrix.rustcomponents.sdk.ClientDelegate
 import uniffi.matrix_sdk_common.BackgroundTaskFailureReason
 import org.matrix.rustcomponents.sdk.MediaSource
 import uniffi.ruma_events.MessageLikeEventType
+import uniffi.ruma_events.stateEventTypeFromString
 
 data class MatrixLoginMethods(val password: Boolean, val sso: Boolean, val oidc: Boolean)
 data class MatrixSecurityStatus(val recovery: String, val verification: String)
@@ -120,6 +124,20 @@ class MatrixProvider @Inject constructor(
     @Volatile private var pendingBrowserLogin: PendingBrowserLogin? = null
 
     fun accounts(): Flow<List<ProviderAccountEntity>> = database.providerAccountDao().observe(id)
+
+    suspend fun setBridgeBot(accountId: String, bridgeBotId: String) = withContext(Dispatchers.IO) {
+        val account = database.providerAccountDao().get(accountId)
+            ?: error("Matrix account no longer exists.")
+        val bot = bridgeBotId.trim().ifBlank { null }
+        require(bot == null || (bot.startsWith("@") && ':' in bot)) {
+            "Enter a full Matrix bot ID, such as @bridge:example.org."
+        }
+        if (account.bridgeBotId != bot) {
+            database.providerAccountDao().upsert(account.copy(bridgeBotId = bot))
+            database.bridgeRoomDao().clearAccount(accountId)
+            database.threadDao().resetMatrixNetworks(accountId)
+        }
+    }
 
     suspend fun previousSyncAt(accountId: String): Long? =
         database.providerSyncDao().cursor("$accountId:sync")?.updatedAt
@@ -326,9 +344,19 @@ class MatrixProvider @Inject constructor(
         response.rooms.joined.forEach { roomId ->
             val room = client.getRoom(roomId) ?: return@forEach
             val key = "$accountId|$roomId"
+            val title = room.displayName() ?: roomId
+            val threadId = ProviderIds.thread(ProviderIds.namespace(id, accountId), roomId)
+            if (database.threadDao().getThread(threadId) == null) {
+                database.threadDao().insert(ThreadEntity(threadId, id, roomId, "MATRIX", title,
+                    title.take(2).uppercase(), updatedAt = System.currentTimeMillis(),
+                    accountId = accountId, networkType = "MATRIX"))
+                database.providerSyncDao().insertMapping(RemoteIdMappingEntity(
+                    ProviderIds.mapping(accountId, "thread", roomId), accountId, "thread", roomId, threadId))
+            }
+            try { refreshBridgeState(accountId, roomId, room) }
+            catch (error: Exception) { Log.w("MatrixProvider", "Could not check bridge room state", error) }
             if (!timelines.containsKey(key)) {
                 val timeline = room.timeline()
-                val title = room.displayName() ?: roomId
                 val permissions = try {
                     room.getPowerLevels().use { levels ->
                         RoomPermissions(
@@ -388,6 +416,31 @@ class MatrixProvider @Inject constructor(
         database.providerSyncDao().upsertCursor(
             SyncCursorEntity("$accountId:sync", accountId, null, response.nextBatch, System.currentTimeMillis()),
         )
+    }
+
+    private suspend fun refreshBridgeState(accountId: String, roomId: String, room: org.matrix.rustcomponents.sdk.Room) {
+        val threadId = ProviderIds.thread(ProviderIds.namespace(id, accountId), roomId)
+        val bot = database.providerAccountDao().get(accountId)?.bridgeBotId
+        if (bot.isNullOrBlank()) return
+        val candidates = MatrixBridgeDetector.stateEventTypes.flatMap { type ->
+            room.stateEvents(stateEventTypeFromString(type)).mapNotNull { event ->
+                val eventId = event.eventId ?: return@mapNotNull null
+                MatrixBridgeDetector.detect(type, eventId, event.sender, event.contentJson, bot)
+                    ?.let { (event.timestamp?.toLong() ?: 0L) to it }
+            }
+        }
+        val match = candidates.maxByOrNull { it.first }?.second
+        if (match == null) {
+            if (database.bridgeRoomDao().get(threadId) != null) {
+                database.bridgeRoomDao().clearThread(threadId)
+                database.threadDao().setMatrixNetwork(threadId, "MATRIX")
+            }
+            return
+        }
+        database.bridgeRoomDao().upsert(BridgeRoomEntity(threadId, accountId, match.stateEventId,
+            match.bridgeBotId, match.protocolId, match.remoteChannelId,
+            match.networkType.name, System.currentTimeMillis()))
+        database.threadDao().setMatrixNetwork(threadId, match.networkType.name)
     }
 
     /** Paginates an open room; timeline events are deduplicated by account and event ID. */
@@ -543,7 +596,8 @@ class MatrixProvider @Inject constructor(
     suspend fun availableActions(messageId: String): MatrixMessageActions {
         val message = database.messageDao().getMessage(messageId) ?: return MatrixMessageActions()
         val thread = database.threadDao().getThread(message.threadId) ?: return MatrixMessageActions()
-        if (thread.providerId != id || thread.networkType != "MATRIX" || message.isDeleted) {
+        if (thread.providerId != id || thread.networkType != "MATRIX" ||
+            database.bridgeRoomDao().get(thread.id) != null || message.isDeleted) {
             return MatrixMessageActions()
         }
         val accountId = thread.accountId ?: return MatrixMessageActions()

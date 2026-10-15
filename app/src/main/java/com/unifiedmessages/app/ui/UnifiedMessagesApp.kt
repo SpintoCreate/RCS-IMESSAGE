@@ -366,6 +366,7 @@ fun UnifiedMessagesApp(
                             },
                             onLogout = matrixAccountViewModel::logout,
                             onRecoverKeys = matrixAccountViewModel::recoverKeys,
+                            onSetBridgeBot = matrixAccountViewModel::setBridgeBot,
                             onBack = { matrixAccountsOpen = false },
                         )
                     } else if (settingsOpen) {
@@ -432,6 +433,7 @@ fun UnifiedMessagesApp(
                                 isSearching = inboxState.isSearching,
                                 onQueryChange = inboxViewModel::setQuery,
                                 source = inboxState.source,
+                                availableSources = inboxState.availableSources,
                                 onSourceChange = inboxViewModel::setSource,
                                 onConversationSelected = { selectedId = it },
                                 onPinToggle = inboxViewModel::setPinned,
@@ -498,6 +500,7 @@ fun UnifiedMessagesApp(
                                     isSearching = inboxState.isSearching,
                                     onQueryChange = inboxViewModel::setQuery,
                                     source = inboxState.source,
+                                    availableSources = inboxState.availableSources,
                                     onSourceChange = inboxViewModel::setSource,
                                     onConversationSelected = { selectedId = it },
                                     onPinToggle = inboxViewModel::setPinned,

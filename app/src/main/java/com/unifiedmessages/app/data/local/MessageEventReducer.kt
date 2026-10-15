@@ -332,7 +332,9 @@ class MessageEventReducer(private val store: MessageEventStore) {
             store.updateThread(
                 previousThread.copy(
                     source = if (newest) thread.source else previousThread.source,
-                    networkType = if (newest) thread.source.uppercase() else previousThread.networkType,
+                    networkType = if (providerId == "matrix" && previousThread.networkType !in listOf(null, "MATRIX"))
+                        previousThread.networkType
+                    else if (newest) thread.source.uppercase() else previousThread.networkType,
                     title = if (newest) thread.title else previousThread.title,
                     avatarText = if (newest) thread.avatarText else previousThread.avatarText,
                     updatedAt = maxOf(previousThread.updatedAt, message.timestamp),

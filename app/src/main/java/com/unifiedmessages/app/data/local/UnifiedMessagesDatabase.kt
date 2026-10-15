@@ -32,6 +32,15 @@ interface ThreadDao {
     @Query("SELECT * FROM threads WHERE id = :id LIMIT 1")
     fun observeThread(id: String): Flow<ThreadEntity?>
 
+    @Query("SELECT DISTINCT UPPER(COALESCE(networkType, source)) FROM threads")
+    fun observeNetworkTypes(): Flow<List<String>>
+
+    @Query("UPDATE threads SET networkType = :networkType WHERE id = :threadId AND providerId = 'matrix'")
+    suspend fun setMatrixNetwork(threadId: String, networkType: String)
+
+    @Query("UPDATE threads SET networkType = 'MATRIX' WHERE accountId = :accountId AND providerId = 'matrix'")
+    suspend fun resetMatrixNetworks(accountId: String)
+
     @Query(
         """
         WITH search_participants AS (
@@ -59,10 +68,10 @@ interface ThreadDao {
                 AND (m.isDeleted = 0 OR (:showSenderDeleted = 1 AND m.deletedBySender = 1))
             ORDER BY m.timestamp DESC, m.id DESC LIMIT 1
         )
-        WHERE (:source IS NULL OR UPPER(t.source) = :source
-            OR (:source = 'SMS' AND UPPER(t.source) = 'MMS'))
+        WHERE (:source IS NULL OR UPPER(COALESCE(t.networkType, t.source)) = :source
+            OR (:source = 'SMS' AND UPPER(COALESCE(t.networkType, t.source)) = 'MMS'))
           AND (:query = '' OR INSTR(LOWER(t.title), LOWER(:query)) > 0
-              OR INSTR(LOWER(t.source), LOWER(:query)) > 0
+              OR INSTR(LOWER(COALESCE(t.networkType, t.source)), LOWER(:query)) > 0
               OR EXISTS (SELECT 1 FROM search_participants p WHERE p.threadId = t.id AND p.isSelf = 0
                   AND (INSTR(LOWER(p.address), LOWER(:query)) > 0
                        OR INSTR(LOWER(COALESCE(p.displayName, '')), LOWER(:query)) > 0
@@ -229,6 +238,24 @@ interface ProviderAccountDao {
 }
 
 @Dao
+interface BridgeRoomDao {
+    @Query("SELECT * FROM bridge_rooms WHERE threadId = :threadId LIMIT 1")
+    fun observe(threadId: String): Flow<BridgeRoomEntity?>
+
+    @Query("SELECT * FROM bridge_rooms WHERE threadId = :threadId LIMIT 1")
+    suspend fun get(threadId: String): BridgeRoomEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(bridge: BridgeRoomEntity)
+
+    @Query("DELETE FROM bridge_rooms WHERE accountId = :accountId")
+    suspend fun clearAccount(accountId: String)
+
+    @Query("DELETE FROM bridge_rooms WHERE threadId = :threadId")
+    suspend fun clearThread(threadId: String)
+}
+
+@Dao
 interface ProviderSyncDao {
     @Query("SELECT * FROM remote_id_mappings WHERE accountId = :accountId AND entityType = :entityType AND remoteId = :remoteId LIMIT 1")
     suspend fun mapping(accountId: String, entityType: String, remoteId: String): RemoteIdMappingEntity?
@@ -281,11 +308,12 @@ interface TypingStateDao {
         AppliedProviderEventEntity::class,
         ContactEntity::class,
         ProviderAccountEntity::class,
+        BridgeRoomEntity::class,
         RemoteIdMappingEntity::class,
         SyncCursorEntity::class,
         PendingProviderEventEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 @TypeConverters(MessageTypeConverters::class)
@@ -295,6 +323,7 @@ abstract class UnifiedMessagesDatabase : RoomDatabase() {
     abstract fun appliedProviderEventDao(): AppliedProviderEventDao
     abstract fun contactsDao(): ContactsDao
     abstract fun providerAccountDao(): ProviderAccountDao
+    abstract fun bridgeRoomDao(): BridgeRoomDao
     abstract fun providerSyncDao(): ProviderSyncDao
     abstract fun typingStateDao(): TypingStateDao
 }

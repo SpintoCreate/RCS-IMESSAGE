@@ -84,3 +84,16 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_typing_states_threadId` ON `typing_states` (`threadId`)")
     }
 }
+
+/** Trust configuration and verified bridge labels are separate from Matrix transport IDs. */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `provider_accounts` ADD COLUMN `bridgeBotId` TEXT")
+        db.execSQL("""CREATE TABLE IF NOT EXISTS `bridge_rooms` (
+            `threadId` TEXT NOT NULL, `accountId` TEXT NOT NULL, `stateEventId` TEXT NOT NULL,
+            `bridgeBotId` TEXT NOT NULL, `protocolId` TEXT NOT NULL,
+            `remoteChannelId` TEXT NOT NULL, `networkType` TEXT NOT NULL,
+            `verifiedAt` INTEGER NOT NULL, PRIMARY KEY(`threadId`))""")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_bridge_rooms_accountId` ON `bridge_rooms` (`accountId`)")
+    }
+}

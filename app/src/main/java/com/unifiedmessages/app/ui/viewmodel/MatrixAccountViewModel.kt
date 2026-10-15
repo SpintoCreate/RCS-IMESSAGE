@@ -124,6 +124,15 @@ class MatrixAccountViewModel @Inject constructor(
         catch (error: Exception) { showError(error) }
     }
 
+    fun setBridgeBot(accountId: String, botId: String) = viewModelScope.launch {
+        mutableState.value = state.value.copy(busy = true, error = null)
+        try {
+            provider.setBridgeBot(accountId, botId)
+            mutableState.value = state.value.copy(busy = false)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) { showError(error) }
+    }
+
     private fun showError(error: Exception) {
         mutableState.value = state.value.copy(
             busy = false, error = error.message ?: "Matrix connection failed. Try again.",

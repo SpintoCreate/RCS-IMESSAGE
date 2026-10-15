@@ -11,7 +11,8 @@ import javax.inject.Singleton
 
 /** Transport and visible network are separate even when one provider currently supplies both. */
 enum class NetworkType(val label: String) {
-    SMS("SMS"), MMS("MMS"), IMESSAGE("iMessage"), RCS("RCS"), MATRIX("Matrix"), UNKNOWN("Unknown");
+    SMS("SMS"), MMS("MMS"), IMESSAGE("iMessage"), RCS("RCS"), MATRIX("Matrix"),
+    WHATSAPP("WhatsApp"), TELEGRAM("Telegram"), GOOGLE_MESSAGES("Google Messages"), UNKNOWN("Unknown");
 
     companion object {
         fun fromSource(source: String): NetworkType = entries.firstOrNull {
@@ -142,7 +143,8 @@ class ProviderSendRouter private constructor(
         route.providerId == "sms" && route.accountId == "sms:local" &&
             route.networkType in setOf(NetworkType.SMS, NetworkType.MMS) -> providers["sms"]
         route.providerId == "matrix" && route.accountId.startsWith("matrix:") &&
-            route.networkType == NetworkType.MATRIX -> providers["matrix"]
+            route.networkType in setOf(NetworkType.MATRIX, NetworkType.WHATSAPP,
+                NetworkType.TELEGRAM, NetworkType.GOOGLE_MESSAGES) -> providers["matrix"]
         else -> null
     }
 

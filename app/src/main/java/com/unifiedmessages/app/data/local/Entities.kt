@@ -48,6 +48,20 @@ data class ProviderAccountEntity(
     /** Android Keystore-backed storage owns the secret; this is only its lookup key. */
     val credentialRef: String?,
     val homeserver: String? = null,
+    /** Only state events from this explicitly trusted Matrix bridge bot may label rooms. */
+    val bridgeBotId: String? = null,
+)
+
+@Entity(tableName = "bridge_rooms", indices = [Index("accountId")])
+data class BridgeRoomEntity(
+    @PrimaryKey val threadId: String,
+    val accountId: String,
+    val stateEventId: String,
+    val bridgeBotId: String,
+    val protocolId: String,
+    val remoteChannelId: String,
+    val networkType: String,
+    val verifiedAt: Long,
 )
 
 @Entity(

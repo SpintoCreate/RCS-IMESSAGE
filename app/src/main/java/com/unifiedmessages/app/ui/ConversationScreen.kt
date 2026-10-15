@@ -250,8 +250,12 @@ fun ConversationScreen(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(Modifier.height(4.dp))
-                    if (conversation.source == MessageSource.SMS || conversation.source == MessageSource.MATRIX) {
+                    if (conversation.source != MessageSource.OTHER) {
                         SourceBadge(source = conversation.source.label)
+                    }
+                    conversation.bridgeDisclosure?.let { disclosure ->
+                        Text(disclosure, color = palette.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelSmall)
                     }
                     if (conversation.typingUsers.isNotEmpty()) {
                         Text(if (conversation.typingUsers.size == 1)

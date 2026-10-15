@@ -10,6 +10,9 @@ enum class MessageSource(val label: String) {
     RCS("RCS"),
     SMS("SMS"),
     MATRIX("Matrix"),
+    WHATSAPP("WhatsApp"),
+    TELEGRAM("Telegram"),
+    GOOGLE_MESSAGES("Google Messages"),
     OTHER("Other"),
 }
 
@@ -46,6 +49,7 @@ data class Conversation(
     /** Cached contact thumbnail, when this is a one-to-one conversation. */
     val photoUri: String? = null,
     val typingUsers: List<String> = emptyList(),
+    val bridgeDisclosure: String? = null,
 ) {
     val preview: String get() = previewText ?: messages.lastOrNull()?.text.orEmpty()
 }

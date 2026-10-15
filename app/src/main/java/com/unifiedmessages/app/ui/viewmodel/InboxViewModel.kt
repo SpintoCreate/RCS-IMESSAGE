@@ -25,6 +25,7 @@ data class InboxUiState(
     val query: String = "",
     val source: MessageSource? = null,
     val isSearching: Boolean = false,
+    val availableSources: List<MessageSource> = listOf(MessageSource.SMS),
 ) {
     val unreadCount: Int get() = conversations.sumOf { it.unreadCount }
 }
@@ -55,13 +56,15 @@ class InboxViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    val uiState: StateFlow<InboxUiState> = combine(query, source, results) { text, filter, result ->
+    val uiState: StateFlow<InboxUiState> = combine(query, source, results,
+        repository.observeAvailableSources()) { text, filter, result, availableSources ->
         val current = result?.takeIf { it.query == text.trim() && it.source == filter }
         InboxUiState(
             conversations = current?.conversations.orEmpty(),
             query = text,
             source = filter,
             isSearching = current == null,
+            availableSources = availableSources,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), InboxUiState(isSearching = true))
 

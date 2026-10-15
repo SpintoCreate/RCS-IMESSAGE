@@ -49,6 +49,12 @@ class MessagingRepository @Inject constructor(
 ) {
     private val deviceRegion = PhoneNumbers.deviceRegion(context)
 
+    fun observeAvailableSources(): Flow<List<MessageSource>> =
+        database.threadDao().observeNetworkTypes().map { types ->
+            (listOf(MessageSource.SMS) + types.map { it.toDisplaySource() })
+                .filter { it != MessageSource.OTHER }.distinct()
+        }
+
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun observeInbox(query: String, source: MessageSource?): Flow<List<Conversation>> {
         val search = query.trim()
@@ -93,6 +99,10 @@ class MessagingRepository @Inject constructor(
             deletedMessagePreferences.showSenderDeletedMessages,
         ) { thread, messages, attachments, participants, showSenderDeleted ->
             thread?.toConversation(messages, attachments, participants.map { it.address }, showSenderDeleted)
+        }.combine(database.bridgeRoomDao().observe(threadId)) { conversation, bridge ->
+            conversation?.copy(bridgeDisclosure = bridge?.let {
+                "This chat uses a ${it.protocolId} bridge. The bridge can read messages; end-to-end encryption does not continue past it."
+            })
         }.combine(observeActiveTyping(threadId)) { conversation, typing ->
             conversation?.copy(typingUsers = typing)
         }.combine(contactsRepository.contacts) { conversation, contacts ->
@@ -170,7 +180,7 @@ class MessagingRepository @Inject constructor(
             route = thread.toMessageRoute(),
             title = thread.title,
             avatarText = thread.avatarText,
-            source = thread.source.toDisplaySource(),
+            source = (thread.networkType ?: thread.source).toDisplaySource(),
             timestamp = formatThreadTimestamp(lastTimestamp ?: thread.updatedAt),
             unreadCount = unreadCount,
             isPinned = thread.isPinned,
@@ -196,7 +206,7 @@ class MessagingRepository @Inject constructor(
             route = toMessageRoute(),
             title = title,
             avatarText = avatarText,
-            source = source.toDisplaySource(),
+            source = (networkType ?: source).toDisplaySource(),
             timestamp = formatThreadTimestamp(visible.lastOrNull()?.timestamp ?: updatedAt),
             unreadCount = messages.count { it.direction == MessageDirection.INCOMING && !it.isRead && !it.isDeleted },
             isPinned = isPinned,
@@ -246,6 +256,9 @@ private fun String.toDisplaySource(): MessageSource = when (uppercase(Locale.ROO
     "RCS" -> MessageSource.RCS
     "SMS", "MMS" -> MessageSource.SMS
     "MATRIX" -> MessageSource.MATRIX
+    "WHATSAPP" -> MessageSource.WHATSAPP
+    "TELEGRAM" -> MessageSource.TELEGRAM
+    "GOOGLE_MESSAGES" -> MessageSource.GOOGLE_MESSAGES
     else -> MessageSource.OTHER
 }
 

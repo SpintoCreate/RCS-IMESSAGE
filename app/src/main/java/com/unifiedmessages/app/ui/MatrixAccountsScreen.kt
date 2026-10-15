@@ -40,6 +40,7 @@ fun MatrixAccountsScreen(
     onOidcLogin: (String) -> Unit,
     onLogout: (String) -> Unit,
     onRecoverKeys: (String, String) -> Unit,
+    onSetBridgeBot: (String, String) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -62,6 +63,7 @@ fun MatrixAccountsScreen(
         Text("Sign in to a Matrix homeserver to import rooms on this phone.",
             color = theme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         state.accounts.forEach { account ->
+            var bridgeBot by rememberSaveable(account.id) { mutableStateOf(account.bridgeBotId.orEmpty()) }
             StyleSurface(
                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp),
                 contentPadding = PaddingValues(16.dp),
@@ -93,6 +95,17 @@ fun MatrixAccountsScreen(
                             }, enabled = !state.busy && recoveryKey.isNotBlank()) {
                                 Text("Restore encrypted messages")
                             }
+                        }
+                    }
+                    if (account.providerId == "matrix") {
+                        Text("Optional bridge bot: rooms are labeled by another network only when their bridge state matches this Matrix ID.",
+                            color = theme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                        OutlinedTextField(value = bridgeBot, onValueChange = { bridgeBot = it },
+                            label = { Text("Bridge bot Matrix ID") }, singleLine = true,
+                            modifier = Modifier.fillMaxWidth())
+                        TextButton(onClick = { onSetBridgeBot(account.id, bridgeBot) },
+                            enabled = !state.busy && bridgeBot.trim() != account.bridgeBotId.orEmpty()) {
+                            Text("Save bridge bot")
                         }
                     }
                     if (account.credentialRef != null) {

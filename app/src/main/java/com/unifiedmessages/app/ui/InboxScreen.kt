@@ -86,6 +86,7 @@ fun InboxScreen(
     query: String,
     onQueryChange: (String) -> Unit,
     source: MessageSource?,
+    availableSources: List<MessageSource> = listOf(MessageSource.SMS),
     onSourceChange: (MessageSource?) -> Unit,
     onConversationSelected: (String) -> Unit,
     onPinToggle: (String, Boolean) -> Unit,
@@ -287,9 +288,8 @@ fun InboxScreen(
                             )
                         }
                         AppDropdownMenu(expanded = sourceMenuOpen, onDismissRequest = { sourceMenuOpen = false }) {
-                            val sourceOptions = listOf<MessageSource?>(null, MessageSource.SMS) +
-                                if (source == MessageSource.MATRIX || conversations.any { it.source == MessageSource.MATRIX }) listOf(MessageSource.MATRIX)
-                                else emptyList()
+                            val sourceOptions = listOf<MessageSource?>(null) +
+                                (availableSources + listOfNotNull(source)).distinct()
                             sourceOptions.forEach { option ->
                                 DropdownMenuItem(
                                     text = { Text(option?.label ?: "All sources") },
@@ -428,7 +428,7 @@ private fun ConversationRow(
             }
             Spacer(Modifier.height(5.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (conversation.source == MessageSource.SMS || conversation.source == MessageSource.MATRIX) {
+                if (conversation.source != MessageSource.OTHER) {
                     SourceBadge(conversation.source.label)
                     Spacer(Modifier.width(6.dp))
                 }
