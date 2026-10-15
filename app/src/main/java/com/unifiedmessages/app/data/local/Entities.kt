@@ -22,7 +22,7 @@ class MessageTypeConverters {
 /** Provider IDs are kept separately from the app's stable, namespaced primary keys. */
 @Entity(
     tableName = "threads",
-    indices = [Index(value = ["providerId", "providerThreadId"], unique = true)],
+    indices = [Index(value = ["accountId", "providerId", "providerThreadId"], unique = true)],
 )
 data class ThreadEntity(
     @PrimaryKey val id: String,

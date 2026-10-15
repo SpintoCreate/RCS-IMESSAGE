@@ -55,3 +55,11 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_pending_provider_events_targetMessageId` ON `pending_provider_events` (`targetMessageId`)")
     }
 }
+
+/** The same Matrix room may be joined through two signed-in accounts. */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DROP INDEX IF EXISTS `index_threads_providerId_providerThreadId`")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_threads_accountId_providerId_providerThreadId` ON `threads` (`accountId`, `providerId`, `providerThreadId`)")
+    }
+}

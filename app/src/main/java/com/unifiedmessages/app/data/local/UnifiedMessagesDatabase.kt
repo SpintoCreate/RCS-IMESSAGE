@@ -259,7 +259,7 @@ interface ProviderSyncDao {
         SyncCursorEntity::class,
         PendingProviderEventEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 @TypeConverters(MessageTypeConverters::class)
