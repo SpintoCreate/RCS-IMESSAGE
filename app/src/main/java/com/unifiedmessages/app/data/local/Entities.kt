@@ -120,6 +120,7 @@ data class MessageEntity(
     val subscriptionId: Int? = null,
     val systemUri: String? = null,
     val subject: String? = null,
+    val replyToProviderMessageId: String? = null,
 )
 
 @Entity(

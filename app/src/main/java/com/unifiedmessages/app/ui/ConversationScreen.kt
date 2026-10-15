@@ -190,7 +190,11 @@ fun ConversationScreen(
             items(visibleMessages, key = { it.id }) { message ->
                 MessageBubble(message, onRetry,
                     onLoadMatrixActions.takeIf { conversation.source == MessageSource.MATRIX },
-                    onReact, onEdit, onUnsend)
+                    onReact, onEdit, onUnsend,
+                    message.replyToProviderMessageId?.let { repliedId ->
+                        conversation.messages.firstOrNull { it.providerMessageId == repliedId }?.text
+                            ?: "Reply to earlier message"
+                    })
             }
         }
 
@@ -401,6 +405,7 @@ private fun MessageBubble(
     onReact: (String, String) -> Unit,
     onEdit: (String, String) -> Unit,
     onUnsend: (String) -> Unit,
+    replyPreview: String?,
 ) {
     val palette = LocalAppTheme.current
     var attachmentsOpen by remember(message.id) { mutableStateOf(false) }
@@ -435,6 +440,12 @@ private fun MessageBubble(
                 shape = shape,
                 contentPadding = PaddingValues(horizontal = 13.dp, vertical = 9.dp),
             ) {
+                if (replyPreview != null) {
+                    Text(replyPreview, color = textColor.copy(alpha = 0.72f),
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 300.dp).padding(bottom = 5.dp))
+                }
                 Text(
                     text = message.text,
                     color = textColor,

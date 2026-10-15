@@ -348,6 +348,7 @@ class MatrixProvider @Inject constructor(
         val reactions: List<MatrixObservedReaction> = emptyList(),
         val editable: Boolean = false,
         val canReply: Boolean = false,
+        val replyToEventId: String? = null,
     )
 
     private data class MediaSnapshot(val sourceJson: String, val filename: String, val mimeType: String)
@@ -388,7 +389,7 @@ class MatrixProvider @Inject constructor(
             media, event.reactions.flatMap { reaction ->
                 reaction.senders.map { sender -> MatrixObservedReaction(sender.senderId, reaction.key,
                     sender.timestamp.toLong()) }
-            }, event.isEditable, event.canBeRepliedTo)
+            }, event.isEditable, event.canBeRepliedTo, content.content.inReplyTo?.eventId())
     }
 
     private suspend fun ingest(accountId: String, roomId: String, title: String, item: Snapshot) {
@@ -407,7 +408,7 @@ class MatrixProvider @Inject constructor(
             attachments = item.media?.let { media -> listOf(ProviderAttachment(
                 "media:0", MatrixMediaRef(accountId, media.sourceJson).encode(),
                 media.mimeType, media.filename,
-            )) }.orEmpty())
+            )) }.orEmpty(), replyToProviderMessageId = item.replyToEventId)
         val base = if (item.isOwn) MessageSent(id, "timeline:$roomId:${item.eventId}", item.timestamp,
             thread, message, accountId)
         else MessageReceived(id, "timeline:$roomId:${item.eventId}", item.timestamp,

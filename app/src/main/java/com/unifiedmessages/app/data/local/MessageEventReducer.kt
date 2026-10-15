@@ -352,6 +352,7 @@ class MessageEventReducer(private val store: MessageEventStore) {
                     subscriptionId = message.subscriptionId,
                     systemUri = message.systemUri,
                     subject = message.subject,
+                    replyToProviderMessageId = message.replyToProviderMessageId,
                 ),
             )
         } else {
@@ -365,6 +366,8 @@ class MessageEventReducer(private val store: MessageEventStore) {
                     subscriptionId = previousMessage.subscriptionId ?: message.subscriptionId,
                     systemUri = previousMessage.systemUri ?: message.systemUri,
                     subject = previousMessage.subject ?: message.subject,
+                    replyToProviderMessageId = previousMessage.replyToProviderMessageId
+                        ?: message.replyToProviderMessageId,
                 ),
             )
         }

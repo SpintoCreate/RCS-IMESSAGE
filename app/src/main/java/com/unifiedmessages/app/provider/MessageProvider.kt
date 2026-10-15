@@ -54,6 +54,7 @@ data class ProviderMessage(
     val subscriptionId: Int? = null,
     val systemUri: String? = null,
     val subject: String? = null,
+    val replyToProviderMessageId: String? = null,
 )
 
 sealed interface MessageEvent {

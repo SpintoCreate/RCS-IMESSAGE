@@ -186,6 +186,8 @@ class MessagingRepository @Inject constructor(
                 )
                 ChatMessage(
                     id = message.id,
+                    providerMessageId = message.providerMessageId,
+                    replyToProviderMessageId = message.replyToProviderMessageId,
                     text = if (messageAttachments.isEmpty()) body else {
                         val label = if (messageAttachments.size == 1) "Media attachment" else "${messageAttachments.size} media attachments"
                         if (body.isBlank() || body == "Media attachment") label else "$body\n$label"

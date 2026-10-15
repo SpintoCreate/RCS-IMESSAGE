@@ -63,3 +63,10 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
         db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_threads_accountId_providerId_providerThreadId` ON `threads` (`accountId`, `providerId`, `providerThreadId`)")
     }
 }
+
+/** Preserve all existing messages while adding the Matrix reply relationship. */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `messages` ADD COLUMN `replyToProviderMessageId` TEXT")
+    }
+}

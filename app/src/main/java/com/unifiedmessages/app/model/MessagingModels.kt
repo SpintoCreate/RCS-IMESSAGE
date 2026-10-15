@@ -20,6 +20,8 @@ data class ChatMessage(
     val isMine: Boolean,
     val attachments: List<ChatAttachment> = emptyList(),
     val deliveryStatus: DeliveryStatus = DeliveryStatus.UNKNOWN,
+    val providerMessageId: String? = null,
+    val replyToProviderMessageId: String? = null,
 )
 
 data class ChatAttachment(

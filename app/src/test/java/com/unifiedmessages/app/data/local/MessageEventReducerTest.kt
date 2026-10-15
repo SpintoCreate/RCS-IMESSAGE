@@ -60,6 +60,17 @@ class MessageEventReducerTest {
         assertEquals(2, store.events.size)
     }
 
+    @Test fun replyTargetSurvivesRemoteReplayAndLaterEnrichment() = runBlocking {
+        val store = InMemoryMessageEventStore()
+        val reducer = MessageEventReducer(store)
+        val reply = message.copy(providerMessageId = "sms:reply", body = "Answer",
+            replyToProviderMessageId = "sms:42")
+        assertTrue(reducer.apply(MessageReceived(providerId, "reply", 120L, thread, reply)))
+        assertTrue(reducer.apply(MessageReceived(providerId, "reply-enriched", 121L, thread,
+            reply.copy(replyToProviderMessageId = null))))
+        assertEquals("sms:42", store.messages.values.single().replyToProviderMessageId)
+    }
+
     @Test fun localEchoKeepsOneRowAfterServerIdAndReplaysEarlyRelation() = runBlocking {
         val store = InMemoryMessageEventStore()
         val reducer = MessageEventReducer(store)
