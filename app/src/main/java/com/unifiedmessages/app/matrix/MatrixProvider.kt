@@ -62,6 +62,7 @@ import org.matrix.rustcomponents.sdk.FileInfo
 import org.matrix.rustcomponents.sdk.UploadParameters
 import org.matrix.rustcomponents.sdk.UploadSource
 import org.matrix.rustcomponents.sdk.SsoHandler
+import org.matrix.rustcomponents.sdk.OAuthConfiguration
 
 data class MatrixLoginMethods(val password: Boolean, val sso: Boolean, val oidc: Boolean)
 
@@ -84,7 +85,7 @@ class MatrixProvider @Inject constructor(
     private val timelines = ConcurrentHashMap<String, RoomTimeline>()
     private val sendHandles = ConcurrentHashMap<String, SendHandle>()
     private data class PendingBrowserLogin(
-        val client: Client, val handler: SsoHandler, val reference: String, val storeKey: String,
+        val client: Client, val handler: SsoHandler?, val reference: String, val storeKey: String,
     )
     @Volatile private var pendingBrowserLogin: PendingBrowserLogin? = null
 
@@ -133,7 +134,7 @@ class MatrixProvider @Inject constructor(
     /** Opens the homeserver's SSO page in the system browser; the app receives a deep-link callback. */
     suspend fun beginSso(homeserver: String): String = withContext(Dispatchers.IO) {
         require(homeserver.isNotBlank()) { "Enter a homeserver first." }
-        pendingBrowserLogin?.let { it.handler.close(); it.client.close() }
+        pendingBrowserLogin?.let { it.handler?.close(); it.client.close() }
         pendingBrowserLogin = null
         val reference = "sso-${UUID.randomUUID()}"
         val storeKey = randomStoreKey()
@@ -151,11 +152,39 @@ class MatrixProvider @Inject constructor(
         }
     }
 
-    suspend fun finishSso(callbackUrl: String): ProviderAccountEntity = withContext(Dispatchers.IO) {
+    /** Uses the SDK's dynamic OIDC client registration and PKCE flow when offered. */
+    suspend fun beginOidc(homeserver: String): String = withContext(Dispatchers.IO) {
+        require(homeserver.isNotBlank()) { "Enter a homeserver first." }
+        pendingBrowserLogin?.let { it.handler?.close(); it.client.close() }
+        pendingBrowserLogin = null
+        val reference = "oidc-${UUID.randomUUID()}"
+        val storeKey = randomStoreKey()
+        val client = buildClient(homeserver.trim(), reference, storeKey)
+        try {
+            check(client.homeserverLoginDetails().supportsOauthLogin()) {
+                "This homeserver does not offer OIDC sign-in."
+            }
+            val config = OAuthConfiguration(
+                "UnifiedMessages", "unifiedmessages://matrix-auth",
+                "https://github.com/SpintoCreate/RCS-IMESSAGE", null, null, null, emptyMap(),
+            )
+            val authorization = client.urlForOauth(config, null, null, null, null)
+            val url = authorization.loginUrl()
+            authorization.close()
+            pendingBrowserLogin = PendingBrowserLogin(client, null, reference, storeKey)
+            url
+        } catch (error: Exception) {
+            client.close()
+            throw error
+        }
+    }
+
+    suspend fun finishBrowserLogin(callbackUrl: String): ProviderAccountEntity = withContext(Dispatchers.IO) {
         val pending = pendingBrowserLogin ?: error("Sign-in expired. Start browser sign-in again.")
         pendingBrowserLogin = null
         try {
-            pending.handler.finish(callbackUrl)
+            if (pending.handler != null) pending.handler.finish(callbackUrl)
+            else pending.client.loginWithOauthCallback(callbackUrl)
             val session = pending.client.session()
             secrets.write(pending.reference, MatrixSecretStore.Record(session, pending.storeKey))
             val account = ProviderAccountEntity(
@@ -170,7 +199,7 @@ class MatrixProvider @Inject constructor(
             pending.client.close()
             throw error
         } finally {
-            pending.handler.close()
+            pending.handler?.close()
         }
     }
 

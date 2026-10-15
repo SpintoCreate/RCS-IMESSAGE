@@ -79,10 +79,20 @@ class MatrixAccountViewModel @Inject constructor(
         catch (error: Exception) { showError(error) }
     }
 
-    fun finishSso(callbackUrl: String) = viewModelScope.launch {
+    fun beginOidc(homeserver: String, openBrowser: (String) -> Unit) = viewModelScope.launch {
         mutableState.value = state.value.copy(busy = true, error = null)
         try {
-            provider.finishSso(callbackUrl)
+            val url = provider.beginOidc(homeserver)
+            openBrowser(url)
+            mutableState.value = state.value.copy(busy = false)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) { showError(error) }
+    }
+
+    fun finishBrowserLogin(callbackUrl: String) = viewModelScope.launch {
+        mutableState.value = state.value.copy(busy = true, error = null)
+        try {
+            provider.finishBrowserLogin(callbackUrl)
             mutableState.value = state.value.copy(busy = false)
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { showError(error) }

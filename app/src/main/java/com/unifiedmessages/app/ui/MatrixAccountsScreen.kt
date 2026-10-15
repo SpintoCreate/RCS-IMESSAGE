@@ -37,6 +37,7 @@ fun MatrixAccountsScreen(
     onDiscover: (String) -> Unit,
     onPasswordLogin: (String, String, String) -> Unit,
     onSsoLogin: (String) -> Unit,
+    onOidcLogin: (String) -> Unit,
     onLogout: (String) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
@@ -101,9 +102,10 @@ fun MatrixAccountsScreen(
                         Text("Sign in with browser")
                     }
                 }
-                if (methods.oidc && !methods.sso) {
-                    Text("This homeserver requires OIDC sign-in, which is not connected yet.",
-                        color = theme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                if (methods.oidc) {
+                    Button(onClick = { onOidcLogin(homeserver) }, enabled = !state.busy) {
+                        Text("Sign in with OIDC")
+                    }
                 }
             }
             if (!methods.password && !methods.sso && !methods.oidc) {

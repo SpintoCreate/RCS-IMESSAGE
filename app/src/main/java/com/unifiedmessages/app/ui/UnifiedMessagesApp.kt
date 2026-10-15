@@ -187,7 +187,7 @@ fun UnifiedMessagesApp(
     LaunchedEffect(matrixCallbackUrl) {
         if (matrixCallbackUrl != null) {
             matrixAccountsOpen = true
-            matrixAccountViewModel.finishSso(matrixCallbackUrl)
+            matrixAccountViewModel.finishBrowserLogin(matrixCallbackUrl)
             onMatrixCallbackHandled()
         }
     }
@@ -340,6 +340,11 @@ fun UnifiedMessagesApp(
                             onPasswordLogin = matrixAccountViewModel::loginPassword,
                             onSsoLogin = { homeserver ->
                                 matrixAccountViewModel.beginSso(homeserver) { url ->
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                }
+                            },
+                            onOidcLogin = { homeserver ->
+                                matrixAccountViewModel.beginOidc(homeserver) { url ->
                                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                                 }
                             },
