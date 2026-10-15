@@ -60,6 +60,28 @@ class MessageEventReducerTest {
         assertEquals(2, store.events.size)
     }
 
+    @Test fun localEchoKeepsOneRowAfterServerIdAndReplaysEarlyRelation() = runBlocking {
+        val store = InMemoryMessageEventStore()
+        val reducer = MessageEventReducer(store)
+        val accountId = "matrix:@one:matrix.org"
+        val room = thread.copy(providerThreadId = "!room:matrix.org", source = "MATRIX")
+        val pending = MessageSent("matrix", "local:txn-1", 100L, room,
+            ProviderMessage("txn:1", "Hello", timestamp = 100L, deliveryStatus = DeliveryStatus.PENDING),
+            accountId)
+        assertTrue(reducer.apply(pending))
+        assertFalse(reducer.apply(MessageEdited("matrix", "edit:server-1", 120L,
+            "\$server-1", "Hello edited", accountId)))
+        val localId = store.messages.values.single().id
+        reducer.bindRemoteMessageId(accountId, "matrix", "\$server-1", localId)
+        assertTrue(reducer.apply(MessageSent("matrix", "remote:server-1", 110L, room,
+            ProviderMessage("\$server-1", "Hello", timestamp = 110L,
+                deliveryStatus = DeliveryStatus.SENT), accountId)))
+        assertEquals(1, store.messages.size)
+        assertEquals(localId, store.messages.values.single().id)
+        assertEquals("Hello edited", store.messages.values.single().body)
+        assertEquals(1, store.edits.size)
+    }
+
     @Test fun editsAndSenderDeletionRetainOriginalHistoryAndMessageRow() = runBlocking {
         val store = InMemoryMessageEventStore()
         val reducer = MessageEventReducer(store)
@@ -294,4 +316,6 @@ private class InMemoryMessageEventStore : MessageEventStore {
     override suspend fun insertPending(event: PendingProviderEventEntity) { pending.putIfAbsent(event.id, event) }
     override suspend fun deletePending(id: String) { pending.remove(id) }
     override suspend fun insertMapping(mapping: RemoteIdMappingEntity) { mappings.putIfAbsent(mapping.id, mapping) }
+    override suspend fun getMapping(accountId: String, entityType: String, remoteId: String): RemoteIdMappingEntity? =
+        mappings[ProviderIds.mapping(accountId, entityType, remoteId)]
 }
