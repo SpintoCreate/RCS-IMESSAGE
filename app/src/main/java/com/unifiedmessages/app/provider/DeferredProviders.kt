@@ -11,5 +11,4 @@ sealed class DeferredProvider(final override val id: String) : MessageProvider {
 
 class OpenBubblesProvider : DeferredProvider("imessage")
 class RcsProvider : DeferredProvider("rcs")
-class MatrixProvider : DeferredProvider("matrix")
 class OpenPigeonProvider : DeferredProvider("openpigeon")

@@ -287,7 +287,9 @@ fun InboxScreen(
                             )
                         }
                         AppDropdownMenu(expanded = sourceMenuOpen, onDismissRequest = { sourceMenuOpen = false }) {
-                            val sourceOptions = listOf<MessageSource?>(null, MessageSource.SMS)
+                            val sourceOptions = listOf<MessageSource?>(null, MessageSource.SMS) +
+                                if (source == MessageSource.MATRIX || conversations.any { it.source == MessageSource.MATRIX }) listOf(MessageSource.MATRIX)
+                                else emptyList()
                             sourceOptions.forEach { option ->
                                 DropdownMenuItem(
                                     text = { Text(option?.label ?: "All sources") },
@@ -426,7 +428,7 @@ private fun ConversationRow(
             }
             Spacer(Modifier.height(5.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (conversation.source == MessageSource.SMS) {
+                if (conversation.source == MessageSource.SMS || conversation.source == MessageSource.MATRIX) {
                     SourceBadge(conversation.source.label)
                     Spacer(Modifier.width(6.dp))
                 }

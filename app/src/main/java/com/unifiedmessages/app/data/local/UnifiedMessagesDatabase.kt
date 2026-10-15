@@ -212,6 +212,9 @@ interface ProviderAccountDao {
     @Query("SELECT * FROM provider_accounts WHERE providerId = :providerId ORDER BY id")
     fun observe(providerId: String): Flow<List<ProviderAccountEntity>>
 
+    @Query("SELECT * FROM provider_accounts WHERE providerId = :providerId ORDER BY id")
+    suspend fun all(providerId: String): List<ProviderAccountEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(account: ProviderAccountEntity)
 }

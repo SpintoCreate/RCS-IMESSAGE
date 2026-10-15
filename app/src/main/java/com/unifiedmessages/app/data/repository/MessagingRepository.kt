@@ -219,6 +219,7 @@ private fun String.toDisplaySource(): MessageSource = when (uppercase(Locale.ROO
     "IMESSAGE" -> MessageSource.IMESSAGE
     "RCS" -> MessageSource.RCS
     "SMS", "MMS" -> MessageSource.SMS
+    "MATRIX" -> MessageSource.MATRIX
     else -> MessageSource.OTHER
 }
 

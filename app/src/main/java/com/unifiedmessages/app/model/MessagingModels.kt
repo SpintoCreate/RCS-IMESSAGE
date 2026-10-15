@@ -9,6 +9,7 @@ enum class MessageSource(val label: String) {
     IMESSAGE("iMessage"),
     RCS("RCS"),
     SMS("SMS"),
+    MATRIX("Matrix"),
     OTHER("Other"),
 }
 

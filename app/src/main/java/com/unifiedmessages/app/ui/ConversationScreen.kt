@@ -224,7 +224,7 @@ fun ConversationScreen(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(Modifier.height(4.dp))
-                    if (conversation.source == MessageSource.SMS) {
+                    if (conversation.source == MessageSource.SMS || conversation.source == MessageSource.MATRIX) {
                         SourceBadge(source = conversation.source.label)
                     }
                 }
