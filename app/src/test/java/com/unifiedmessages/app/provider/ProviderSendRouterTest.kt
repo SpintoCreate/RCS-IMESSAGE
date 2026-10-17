@@ -77,6 +77,23 @@ class ProviderSendRouterTest {
         assertEquals(listOf("Hi"), provider.sent)
     }
 
+    @Test fun matrixInviteCannotSendUntilJoined() = runBlocking {
+        val invited = MessageRoute("invite", "matrix:@alice:matrix.org", "matrix",
+            NetworkType.MATRIX, "!room:matrix.org", "INVITED")
+        val provider = FakeProvider("matrix")
+        val router = ProviderSendRouter.forTesting(object : SendRouteLookup {
+            override suspend fun forThread(threadId: String) = invited
+            override suspend fun forMessage(messageId: String) = invited
+        }, listOf(provider))
+        assertEquals("Join this Matrix room before sending.",
+            router.availability(invited, emptyList(), "US").disabledReason)
+        assertTrue(runCatching { router.send(invited.threadId, "Hi", emptyList()) }
+            .exceptionOrNull() is IllegalStateException)
+        assertTrue(runCatching { router.retry("old-message") }
+            .exceptionOrNull() is IllegalStateException)
+        assertTrue(provider.sent.isEmpty())
+    }
+
     @Test fun replyUsesSameRoomAndRejectsAnUnrelatedTarget() = runBlocking {
         val matrix = route.copy(accountId = "matrix:@alice:matrix.org", providerId = "matrix",
             networkType = NetworkType.MATRIX, remoteThreadId = "!room:matrix.org")

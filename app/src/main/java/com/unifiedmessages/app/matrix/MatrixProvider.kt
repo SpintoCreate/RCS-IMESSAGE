@@ -53,6 +53,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import org.matrix.rustcomponents.sdk.Client
 import org.matrix.rustcomponents.sdk.ClientBuilder
 import org.matrix.rustcomponents.sdk.ClientSessionDelegate
@@ -341,6 +342,26 @@ class MatrixProvider @Inject constructor(
     suspend fun syncOnce(accountId: String) = withContext(Dispatchers.IO) {
         val client = clients[accountId] ?: error("Sign in to this Matrix account first.")
         val response = client.syncOnceV2(SyncSettingsV2(timeoutMs = 30_000uL))
+        response.rooms.invited.forEach { roomId ->
+            val room = client.getRoom(roomId) ?: return@forEach
+            val title = room.displayName() ?: roomId
+            val threadId = ProviderIds.thread(ProviderIds.namespace(id, accountId), roomId)
+            val existing = database.threadDao().getThread(threadId)
+            if (existing == null) {
+                database.threadDao().insert(ThreadEntity(threadId, id, roomId, "MATRIX", title,
+                    title.take(2).uppercase(), updatedAt = System.currentTimeMillis(),
+                    accountId = accountId, networkType = "MATRIX", membership = "INVITED"))
+                database.providerSyncDao().insertMapping(RemoteIdMappingEntity(
+                    ProviderIds.mapping(accountId, "thread", roomId), accountId, "thread", roomId, threadId))
+            } else database.threadDao().update(existing.copy(membership = "INVITED"))
+        }
+        response.rooms.left.forEach { roomId ->
+            val threadId = ProviderIds.thread(ProviderIds.namespace(id, accountId), roomId)
+            database.threadDao().setMatrixMembership(threadId, "LEFT")
+            timelines.remove("$accountId|$roomId")?.let {
+                it.listener.close(); it.typingListener.close(); it.timeline.close()
+            }
+        }
         response.rooms.joined.forEach { roomId ->
             val room = client.getRoom(roomId) ?: return@forEach
             val key = "$accountId|$roomId"
@@ -352,7 +373,7 @@ class MatrixProvider @Inject constructor(
                     accountId = accountId, networkType = "MATRIX"))
                 database.providerSyncDao().insertMapping(RemoteIdMappingEntity(
                     ProviderIds.mapping(accountId, "thread", roomId), accountId, "thread", roomId, threadId))
-            }
+            } else database.threadDao().setMatrixMembership(threadId, "JOINED")
             try { refreshBridgeState(accountId, roomId, room) }
             catch (error: Exception) { Log.w("MatrixProvider", "Could not check bridge room state", error) }
             if (!timelines.containsKey(key)) {
@@ -418,6 +439,18 @@ class MatrixProvider @Inject constructor(
         )
     }
 
+    suspend fun joinRoom(threadId: String) = withContext(Dispatchers.IO) {
+        val thread = database.threadDao().getThread(threadId) ?: error("Room no longer exists.")
+        check(thread.providerId == id && thread.membership == "INVITED") {
+            "This is not an active Matrix invitation."
+        }
+        val accountId = thread.accountId ?: error("This room has no Matrix account.")
+        val room = clients[accountId]?.getRoom(thread.providerThreadId)
+            ?: error("Reconnect this Matrix account to join.")
+        room.use { it.join() }
+        database.threadDao().setMatrixMembership(threadId, "JOINED")
+    }
+
     private suspend fun refreshBridgeState(accountId: String, roomId: String, room: org.matrix.rustcomponents.sdk.Room) {
         val threadId = ProviderIds.thread(ProviderIds.namespace(id, accountId), roomId)
         val bot = database.providerAccountDao().get(accountId)?.bridgeBotId
@@ -445,8 +478,12 @@ class MatrixProvider @Inject constructor(
 
     /** Paginates an open room; timeline events are deduplicated by account and event ID. */
     suspend fun backfill(accountId: String, remoteRoomId: String): Boolean = withContext(Dispatchers.IO) {
-        val timeline = timelines["$accountId|$remoteRoomId"]?.timeline ?: return@withContext false
-        timeline.paginateBackwards(50u.toUShort())
+        repeat(60) {
+            val timeline = timelines["$accountId|$remoteRoomId"]?.timeline
+            if (timeline != null) return@withContext timeline.paginateBackwards(50u.toUShort())
+            delay(500)
+        }
+        false
     }
 
     private data class Snapshot(
@@ -587,6 +624,8 @@ class MatrixProvider @Inject constructor(
     }
 
     override fun connectionIssue(route: MessageRoute): String? {
+        if (route.membership != "JOINED") return if (route.membership == "INVITED")
+            "Join this Matrix room before sending." else "You are not in this Matrix room."
         connectionIssue(route.accountId)?.let { return it }
         val room = route.remoteThreadId?.let { timelines["${route.accountId}|$it"] }
             ?: return "Wait for this Matrix room to sync before sending."

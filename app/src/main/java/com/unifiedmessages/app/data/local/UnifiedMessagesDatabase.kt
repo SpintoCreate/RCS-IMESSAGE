@@ -41,6 +41,9 @@ interface ThreadDao {
     @Query("UPDATE threads SET networkType = 'MATRIX' WHERE accountId = :accountId AND providerId = 'matrix'")
     suspend fun resetMatrixNetworks(accountId: String)
 
+    @Query("UPDATE threads SET membership = :membership WHERE id = :threadId AND providerId = 'matrix'")
+    suspend fun setMatrixMembership(threadId: String, membership: String)
+
     @Query(
         """
         WITH search_participants AS (
@@ -313,7 +316,7 @@ interface TypingStateDao {
         SyncCursorEntity::class,
         PendingProviderEventEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 @TypeConverters(MessageTypeConverters::class)

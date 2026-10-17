@@ -77,6 +77,14 @@ class MessageSendViewModel @Inject constructor(
 
     fun clearError() { mutableError.value = null }
 
+    fun joinRoom(threadId: String) {
+        viewModelScope.launch {
+            try { matrixProvider.joinRoom(threadId) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { mutableError.value = error.message ?: "Could not join this Matrix room." }
+        }
+    }
+
     fun typing(threadId: String, active: Boolean) {
         typingJobs.remove(threadId)?.cancel()
         val sendStart = active && activeTypingThreads.add(threadId)

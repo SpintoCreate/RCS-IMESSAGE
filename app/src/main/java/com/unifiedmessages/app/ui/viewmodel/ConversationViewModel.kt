@@ -13,11 +13,13 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 
 data class ConversationUiState(
     val conversation: Conversation? = null,
@@ -33,6 +35,7 @@ class ConversationViewModel @Inject constructor(
     private val selectedThreadId = MutableStateFlow<String?>(null)
     private val searchQuery = MutableStateFlow("")
     private var readJob: Job? = null
+    private var backfillJob: Job? = null
 
     val uiState: StateFlow<ConversationUiState> = combine(selectedThreadId, searchQuery) { id, query ->
         id to query
@@ -47,6 +50,14 @@ class ConversationViewModel @Inject constructor(
         if (selectedThreadId.value == threadId) return
         selectedThreadId.value = threadId
         searchQuery.value = ""
+        backfillJob?.cancel()
+        backfillJob = if (threadId == null) null else viewModelScope.launch {
+            repository.observeJoinedMatrixRoom(threadId).distinctUntilChanged().filter { it }.collect {
+                try { repository.backfillMatrixOnOpen(threadId) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { /* Cached history remains visible while offline. */ }
+            }
+        }
         readJob?.cancel()
         readJob = if (threadId == null) null else viewModelScope.launch {
             repository.observeUnreadCount(threadId).filter { it > 0 }.collect {

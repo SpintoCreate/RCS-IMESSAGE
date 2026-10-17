@@ -27,6 +27,7 @@ data class MessageRoute(
     val providerId: String,
     val networkType: NetworkType,
     val remoteThreadId: String? = null,
+    val membership: String = "JOINED",
 ) {
     val label: String get() = networkType.label
 }
@@ -50,6 +51,7 @@ private class RoomSendRouteLookup(private val database: UnifiedMessagesDatabase)
                 thread.providerId,
                 NetworkType.fromSource(thread.networkType ?: thread.source),
                 thread.providerThreadId,
+                thread.membership,
             )
         }
 
@@ -84,6 +86,11 @@ class ProviderSendRouter private constructor(
     private val sendingThreads = ConcurrentHashMap.newKeySet<String>()
 
     fun availability(route: MessageRoute, recipients: List<String>, region: String): SendAvailability {
+        if (route.providerId == "matrix" && route.membership != "JOINED") {
+            return SendAvailability(route.label,
+                if (route.membership == "INVITED") "Join this Matrix room before sending."
+                else "You are not in this Matrix room.")
+        }
         val provider = providerFor(route)
             ?: return SendAvailability(route.label, "Messaging is not connected for this conversation.")
         val issue = provider.connectionIssue(route)
@@ -101,6 +108,9 @@ class ProviderSendRouter private constructor(
         check(sendingThreads.add(threadId)) { "A message is already sending in this conversation." }
         try {
             val route = routes.forThread(threadId) ?: error("Conversation no longer exists.")
+            check(route.providerId != "matrix" || route.membership == "JOINED") {
+                "Join this Matrix room before sending."
+            }
             val provider = providerFor(route) ?: error("Messaging is not connected for this conversation.")
             provider.connectionIssue(route)?.let(::error)
             provider.send(threadId, text, attachments)
@@ -111,6 +121,9 @@ class ProviderSendRouter private constructor(
 
     suspend fun retry(messageId: String) {
         val route = routes.forMessage(messageId) ?: error("Message no longer exists.")
+        check(route.providerId != "matrix" || route.membership == "JOINED") {
+            "Join this Matrix room before sending."
+        }
         check(sendingThreads.add(route.threadId)) { "A message is already sending in this conversation." }
         try {
             val provider = providerFor(route) ?: error("Messaging is not connected for this conversation.")
@@ -127,6 +140,9 @@ class ProviderSendRouter private constructor(
         check(sendingThreads.add(threadId)) { "A message is already sending in this conversation." }
         try {
             val route = routes.forThread(threadId) ?: error("Conversation no longer exists.")
+            check(route.providerId != "matrix" || route.membership == "JOINED") {
+                "Join this Matrix room before sending."
+            }
             check(routes.forMessage(repliedToMessageId)?.threadId == threadId) {
                 "The replied-to message is not in this conversation."
             }

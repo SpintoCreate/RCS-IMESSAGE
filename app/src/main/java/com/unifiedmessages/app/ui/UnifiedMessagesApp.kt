@@ -474,6 +474,7 @@ fun UnifiedMessagesApp(
                                             messageSendViewModel.reply(selected.id, targetId, body, complete)
                                         },
                                         onDraftTyping = messageSendViewModel::typing,
+                                        onJoinRoom = { messageSendViewModel.joinRoom(selected.id) },
                                         smsAccessBanner = smsAccessBanner.takeIf { selected.source == MessageSource.SMS },
                                         onRequestSmsAccess = requestSmsAccess,
                                         onBack = { selectedId = null },
@@ -535,6 +536,7 @@ fun UnifiedMessagesApp(
                                         messageSendViewModel.reply(conversation.id, targetId, body, complete)
                                     },
                                     onDraftTyping = messageSendViewModel::typing,
+                                    onJoinRoom = { messageSendViewModel.joinRoom(conversation.id) },
                                     smsAccessBanner = smsAccessBanner.takeIf { conversation.source == MessageSource.SMS },
                                     onRequestSmsAccess = requestSmsAccess,
                                     onBack = { selectedId = null },

@@ -149,6 +149,19 @@ class MessagingRepository @Inject constructor(
     suspend fun setPinned(threadId: String, pinned: Boolean) =
         database.threadDao().setPinned(threadId, pinned)
 
+    suspend fun backfillMatrixOnOpen(threadId: String) {
+        val thread = database.threadDao().getThread(threadId) ?: return
+        if (thread.providerId == "matrix" && thread.membership == "JOINED") {
+            val accountId = thread.accountId ?: return
+            matrixProvider.backfill(accountId, thread.providerThreadId)
+        }
+    }
+
+    fun observeJoinedMatrixRoom(threadId: String): Flow<Boolean> =
+        database.threadDao().observeThread(threadId).map {
+            it?.providerId == "matrix" && it.membership == "JOINED"
+        }
+
     private fun Conversation.withContacts(contactsByNumber: Map<String, CachedContact>): Conversation {
         if (recipients.isEmpty()) return this
         val matches = recipients.map { address ->
@@ -188,6 +201,8 @@ class MessagingRepository @Inject constructor(
             recipients = recipients,
             previewText = matchingBody?.let { SearchMatching.messageSnippet(it, search) } ?: if (lastIsDeleted) {
                 if (lastDeletedBySender && showSenderDeleted) "Deleted by sender" else ""
+            } else if (thread.membership == "INVITED") {
+                "Invitation to a Matrix room"
             } else {
                 displayBody(lastBody, lastContentType, lastSubject)
             },
@@ -242,6 +257,7 @@ private fun ThreadEntity.toMessageRoute(): MessageRoute = MessageRoute(
     providerId = providerId,
     networkType = NetworkType.fromSource(networkType ?: source),
     remoteThreadId = providerThreadId,
+    membership = membership,
 )
 
 private fun initialsFor(name: String): String = name.trim()

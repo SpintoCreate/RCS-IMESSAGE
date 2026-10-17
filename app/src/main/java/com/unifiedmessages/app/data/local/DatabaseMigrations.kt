@@ -97,3 +97,9 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_bridge_rooms_accountId` ON `bridge_rooms` (`accountId`)")
     }
 }
+
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `threads` ADD COLUMN `membership` TEXT NOT NULL DEFAULT 'JOINED'")
+    }
+}

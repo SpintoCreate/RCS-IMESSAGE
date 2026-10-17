@@ -1,6 +1,7 @@
 package com.unifiedmessages.app.data.local
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -37,6 +38,7 @@ data class ThreadEntity(
     val accountId: String? = null,
     /** The visible network is independent of the provider transport. */
     val networkType: String? = null,
+    @ColumnInfo(defaultValue = "JOINED") val membership: String = "JOINED",
 )
 
 @Entity(tableName = "provider_accounts", indices = [Index("providerId")])

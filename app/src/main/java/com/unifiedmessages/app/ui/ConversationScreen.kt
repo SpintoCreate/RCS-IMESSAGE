@@ -102,6 +102,7 @@ fun ConversationScreen(
     onUnsend: (String) -> Unit = {},
     onReplySend: (String, String, (Boolean) -> Unit) -> Unit = { _, _, done -> done(false) },
     onDraftTyping: (String, Boolean) -> Unit = { _, _ -> },
+    onJoinRoom: () -> Unit = {},
     smsAccessBanner: String? = null,
     onRequestSmsAccess: () -> Unit = {},
     onBack: () -> Unit,
@@ -325,6 +326,9 @@ fun ConversationScreen(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 12.dp),
         ) {
             Column {
+                if (conversation.route.membership == "INVITED") {
+                    TextButton(onClick = onJoinRoom) { Text("Join Matrix room") }
+                }
                 Text(
                     text = if (sendPending) "Sending message…"
                     else sendAvailability.disabledReason

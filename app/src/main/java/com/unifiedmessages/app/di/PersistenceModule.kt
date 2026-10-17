@@ -8,6 +8,7 @@ import com.unifiedmessages.app.data.local.MIGRATION_3_4
 import com.unifiedmessages.app.data.local.MIGRATION_4_5
 import com.unifiedmessages.app.data.local.MIGRATION_5_6
 import com.unifiedmessages.app.data.local.MIGRATION_6_7
+import com.unifiedmessages.app.data.local.MIGRATION_7_8
 import com.unifiedmessages.app.data.local.UnifiedMessagesDatabase
 import dagger.Module
 import dagger.Provides
@@ -23,6 +24,6 @@ object PersistenceModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): UnifiedMessagesDatabase =
         Room.databaseBuilder(context, UnifiedMessagesDatabase::class.java, "unified_messages.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
             .build()
 }
