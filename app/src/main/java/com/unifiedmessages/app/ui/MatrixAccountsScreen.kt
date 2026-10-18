@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import com.unifiedmessages.app.ui.components.StyleSurface
 import com.unifiedmessages.app.ui.theme.LocalAppTheme
 import com.unifiedmessages.app.ui.viewmodel.MatrixAccountUiState
+import com.unifiedmessages.app.matrix.MatrixSyncPhase
 import com.unifiedmessages.app.BuildConfig
 
 @Composable
@@ -42,6 +43,7 @@ fun MatrixAccountsScreen(
     onOidcLogin: (String) -> Unit,
     onLogout: (String) -> Unit,
     onResetLocalData: (String) -> Unit,
+    onRetrySync: (String) -> Unit,
     onRecoverKeys: (String, String) -> Unit,
     onSetBridgeBot: (String, String) -> Unit,
     onBack: () -> Unit,
@@ -82,6 +84,19 @@ fun MatrixAccountsScreen(
                     Text(account.remoteSelfId ?: account.id, color = theme.onSurface)
                     Text(account.connectionState.lowercase().replaceFirstChar { it.titlecase() },
                         color = theme.onSurfaceVariant)
+                    val sync = state.syncProgress[account.id]
+                    if (account.connectionState == "CONNECTED" || sync != null) {
+                        Text(sync?.message ?: "Syncing...",
+                            color = if (sync?.phase == MatrixSyncPhase.FAILED)
+                                MaterialTheme.colorScheme.error else theme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium)
+                    }
+                    if (sync?.phase == MatrixSyncPhase.FAILED ||
+                        account.connectionState == "NEEDS_ATTENTION" && sync == null) {
+                        TextButton(onClick = { onRetrySync(account.id) }, enabled = !state.busy) {
+                            Text("Retry sync")
+                        }
+                    }
                     if (account.connectionState == "AUTH_EXPIRED") {
                         Text("Your Matrix sign-in expired. Sign in again with this homeserver and account.",
                             color = theme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)

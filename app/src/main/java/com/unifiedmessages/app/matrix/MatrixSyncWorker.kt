@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
@@ -33,6 +34,11 @@ interface MatrixWorkerEntryPoint { fun matrixProvider(): MatrixProvider }
 /** Best-effort phone-only sync. WorkManager's 15-minute minimum is not real-time push. */
 class MatrixSyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result = coroutineScope {
+        if (MatrixAppVisibility.isForeground) {
+            Log.d("MatrixDebug", "Background sync skipped while app is foreground")
+            return@coroutineScope Result.success()
+        }
+        Log.i("MatrixDebug", "Background Matrix catch-up started")
         val provider = EntryPointAccessors.fromApplication(
             applicationContext, MatrixWorkerEntryPoint::class.java,
         ).matrixProvider()
@@ -55,13 +61,19 @@ class MatrixSyncWorker(context: Context, params: WorkerParameters) : CoroutineWo
             accounts.forEach { account ->
                 try { provider.syncOnce(account.id) }
                 catch (cancelled: CancellationException) { throw cancelled }
-                catch (_: Exception) { failed = true }
+                catch (error: Exception) {
+                    failed = true
+                    Log.e("MatrixDebug", "Background Matrix catch-up failed: ${error.javaClass.simpleName}")
+                }
             }
             // Timeline listeners dispatch on the SDK's own executor after sync returns.
             if (accounts.isNotEmpty()) delay(2_500)
             if (failed) Result.retry() else Result.success()
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { Result.retry() }
+        catch (error: Exception) {
+            Log.e("MatrixDebug", "Background Matrix restore failed: ${error.javaClass.simpleName}")
+            Result.retry()
+        }
         finally { listener.cancel() }
     }
 

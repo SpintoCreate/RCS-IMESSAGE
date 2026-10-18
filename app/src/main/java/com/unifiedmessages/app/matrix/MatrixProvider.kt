@@ -75,6 +75,9 @@ import org.matrix.rustcomponents.sdk.EventOrTransactionId
 import org.matrix.rustcomponents.sdk.TimelineItemContent
 import org.matrix.rustcomponents.sdk.MsgLikeKind
 import org.matrix.rustcomponents.sdk.SyncSettingsV2
+import org.matrix.rustcomponents.sdk.SyncService
+import org.matrix.rustcomponents.sdk.SyncServiceStateObserver
+import org.matrix.rustcomponents.sdk.SyncServiceState
 import org.matrix.rustcomponents.sdk.EventSendState
 import org.matrix.rustcomponents.sdk.SendHandle
 import org.matrix.rustcomponents.sdk.messageEventContentFromMarkdown
@@ -116,7 +119,14 @@ class MatrixProvider @Inject constructor(
     private val secrets = MatrixSecretStore(context)
     private val startupGuard = MatrixStartupGuard(context)
     private val restoreMutex = Mutex()
+    private val syncLocks = ConcurrentHashMap<String, Mutex>()
     private val awaitingFirstSync = ConcurrentHashMap.newKeySet<String>()
+    private val completedSync = ConcurrentHashMap.newKeySet<String>()
+    private val failedSync = ConcurrentHashMap.newKeySet<String>()
+    private data class ForegroundService(val service: SyncService, val observer: TaskHandle)
+    private val foregroundServices = ConcurrentHashMap<String, ForegroundService>()
+    private val foregroundStates = MutableSharedFlow<Pair<String, SyncServiceState>>(extraBufferCapacity = 32)
+    val foregroundSyncStates: Flow<Pair<String, SyncServiceState>> = foregroundStates.asSharedFlow()
     private val clients = ConcurrentHashMap<String, Client>()
     private val authDelegates = ConcurrentHashMap<String, TaskHandle>()
     private val reducer = MessageEventReducer(database)
@@ -345,8 +355,9 @@ class MatrixProvider @Inject constructor(
     }
 
     private suspend fun markNeedsAttention(accountId: String, error: Exception): ProviderAccountEntity {
-        Log.e("MatrixProvider", "Matrix account startup failed (${error.javaClass.simpleName}); pausing this account")
+        Log.e("MatrixDebug", "Matrix account startup failed (${error.javaClass.simpleName}); pausing this account")
         awaitingFirstSync.remove(accountId)
+        runCatching { stopForegroundSync(accountId) }
         authDelegates.remove(accountId)?.let { runCatching { it.close() } }
         timelines.keys.filter { it.startsWith("$accountId|") }.forEach { key ->
             timelines.remove(key)?.let { room ->
@@ -373,6 +384,7 @@ class MatrixProvider @Inject constructor(
             val account = database.providerAccountDao().get(accountId) ?: return@withLock
             require(account.providerId == id) { "Only a Matrix account can be reset here." }
             awaitingFirstSync.remove(accountId)
+            runCatching { stopForegroundSync(accountId) }
             authDelegates.remove(accountId)?.let { runCatching { it.close() } }
             timelines.keys.filter { it.startsWith("$accountId|") }.forEach { key ->
                 timelines.remove(key)?.let { room ->
@@ -398,6 +410,7 @@ class MatrixProvider @Inject constructor(
 
     suspend fun logout(accountId: String) = withContext(Dispatchers.IO) {
         val account = database.providerAccountDao().get(accountId) ?: return@withContext
+        runCatching { stopForegroundSync(accountId) }
         authDelegates.remove(accountId)?.close()
         timelines.keys.filter { it.startsWith("$accountId|") }.forEach { key ->
             timelines.remove(key)?.let { it.listener.close(); it.typingListener.close(); it.timeline.close() }
@@ -441,21 +454,89 @@ class MatrixProvider @Inject constructor(
     }
 
     /** SDK sync tokens live in its encrypted store; Room also records each completed batch cursor. */
-    suspend fun syncOnce(accountId: String) {
+    suspend fun syncOnce(accountId: String) = syncLocks.computeIfAbsent(accountId) { Mutex() }.withLock {
         try {
+            failedSync.remove(accountId)
             syncOnceInternal(accountId)
+            completedSync.add(accountId)
             if (awaitingFirstSync.remove(accountId)) startupGuard.clear(accountId)
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) {
+            failedSync.add(accountId)
             if (awaitingFirstSync.contains(accountId)) markNeedsAttention(accountId, error)
             throw error
+        }
+    }
+
+    fun roomCount(accountId: String): Int = clients[accountId]?.rooms()?.count { room ->
+        room.use {
+            it.membership() == org.matrix.rustcomponents.sdk.Membership.JOINED ||
+                it.membership() == org.matrix.rustcomponents.sdk.Membership.INVITED
+        }
+    } ?: 0
+
+    /** SDK sliding-sync service keeps the foreground Matrix client current between Room imports. */
+    suspend fun startForegroundSync(accountId: String) = withContext(Dispatchers.IO) {
+        if (foregroundServices.containsKey(accountId)) return@withContext
+        val client = clients[accountId] ?: return@withContext
+        val service = client.syncService().finish()
+        try {
+            val observer = service.state(object : SyncServiceStateObserver {
+                override fun onUpdate(state: org.matrix.rustcomponents.sdk.SyncServiceState) {
+                    Log.d("MatrixDebug", "Foreground SDK sync service: ${state.name}")
+                    foregroundStates.tryEmit(accountId to state)
+                }
+            })
+            val prior = foregroundServices.putIfAbsent(accountId, ForegroundService(service, observer))
+            if (prior != null) { observer.close(); service.close(); return@withContext }
+            service.start()
+            Log.i("MatrixDebug", "Foreground SDK sync service started")
+        } catch (error: Exception) {
+            foregroundServices.remove(accountId)?.observer?.close()
+            service.close()
+            throw error
+        }
+    }
+
+    suspend fun stopForegroundSync(accountId: String) = withContext(Dispatchers.IO) {
+        foregroundServices.remove(accountId)?.let { running ->
+            try { running.service.stop() }
+            finally { running.observer.close(); running.service.close() }
+            Log.i("MatrixDebug", "Foreground SDK sync service stopped")
+        }
+    }
+
+    suspend fun retryStartup(accountId: String) = withContext(Dispatchers.IO) {
+        val account = database.providerAccountDao().get(accountId) ?: error("Matrix account is missing.")
+        check(account.connectionState == "CONNECTED" || account.connectionState == "NEEDS_ATTENTION") {
+            "Sign in to this Matrix account before retrying sync."
+        }
+        check(startupGuard.failures(accountId) < 2) {
+            "Matrix startup failed twice. Sign out and reset Matrix data, then sign in again."
+        }
+        if (account.connectionState == "NEEDS_ATTENTION") {
+            database.providerAccountDao().upsert(account.copy(connectionState = "DISCONNECTED"))
+            val restored = restoreAccounts().firstOrNull { it.id == accountId }
+            check(restored?.connectionState == "CONNECTED") {
+                "Matrix session could not be restored. Sign out and reset Matrix data, then sign in again."
+            }
         }
     }
 
     private suspend fun syncOnceInternal(accountId: String) = withContext(Dispatchers.IO) {
         val client = clients[accountId] ?: error("Sign in to this Matrix account first.")
         val response = client.syncOnceV2(SyncSettingsV2(timeoutMs = 30_000uL))
-        response.rooms.invited.forEach { roomId ->
+        // The response lists only rooms updated in this batch. Rehydrate cached rooms too,
+        // including after a background worker or sliding sync consumed their initial updates.
+        val cachedRooms = client.rooms().map { room -> room.use { it.id() to it.membership() } }
+        val leftIds = response.rooms.left.toSet()
+        val invitedIds = MatrixRoomSelection.active(response.rooms.invited, cachedRooms.filter {
+            it.second == org.matrix.rustcomponents.sdk.Membership.INVITED
+        }.map { it.first }, leftIds)
+        val joinedIds = MatrixRoomSelection.active(response.rooms.joined, cachedRooms.filter {
+            it.second == org.matrix.rustcomponents.sdk.Membership.JOINED
+        }.map { it.first }, leftIds)
+        invitedIds.forEach { roomId ->
             val room = client.getRoom(roomId) ?: return@forEach
             val title = room.displayName() ?: roomId
             val threadId = ProviderIds.thread(ProviderIds.namespace(id, accountId), roomId)
@@ -475,7 +556,7 @@ class MatrixProvider @Inject constructor(
                 it.listener.close(); it.typingListener.close(); it.timeline.close()
             }
         }
-        response.rooms.joined.forEach { roomId ->
+        joinedIds.forEach { roomId ->
             val room = client.getRoom(roomId) ?: return@forEach
             val key = "$accountId|$roomId"
             val title = room.displayName() ?: roomId
@@ -487,8 +568,10 @@ class MatrixProvider @Inject constructor(
                 database.providerSyncDao().insertMapping(RemoteIdMappingEntity(
                     ProviderIds.mapping(accountId, "thread", roomId), accountId, "thread", roomId, threadId))
             } else database.threadDao().setMatrixMembership(threadId, "JOINED")
-            try { refreshBridgeState(accountId, roomId, client) }
-            catch (error: Exception) { Log.w("MatrixProvider", "Could not check bridge room state", error) }
+            if (!timelines.containsKey(key) || roomId in response.rooms.joined) {
+                try { refreshBridgeState(accountId, roomId, client) }
+                catch (error: Exception) { Log.w("MatrixProvider", "Could not check bridge room state", error) }
+            }
             if (!timelines.containsKey(key)) {
                 val timeline = room.timeline()
                 val permissions = try {
@@ -752,7 +835,12 @@ class MatrixProvider @Inject constructor(
 
     override fun connectionIssue(accountId: String): String? = when {
         !clients.containsKey(accountId) -> "Reconnect this Matrix account to send."
-        timelines.keys.none { it.startsWith("$accountId|") } -> "Wait for this Matrix account to sync."
+        timelines.keys.none { it.startsWith("$accountId|") } && failedSync.contains(accountId) ->
+            "Matrix sync failed. Open Matrix accounts and tap Retry."
+        timelines.keys.none { it.startsWith("$accountId|") } && completedSync.contains(accountId) ->
+            "No rooms yet. Invite this account from another Matrix client."
+        timelines.keys.none { it.startsWith("$accountId|") } ->
+            "Matrix sync is starting. Open Matrix accounts for progress or Retry."
         else -> null
     }
 
@@ -761,7 +849,7 @@ class MatrixProvider @Inject constructor(
             "Join this Matrix room before sending." else "You are not in this Matrix room."
         connectionIssue(route.accountId)?.let { return it }
         val room = route.remoteThreadId?.let { timelines["${route.accountId}|$it"] }
-            ?: return "Wait for this Matrix room to sync before sending."
+            ?: return "This Matrix room has not loaded. Open Matrix accounts for progress or Retry."
         return if (room.permissions.send) null else "You cannot send messages in this Matrix room."
     }
 

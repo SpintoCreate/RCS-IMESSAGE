@@ -8,12 +8,22 @@ import com.unifiedmessages.app.matrix.MatrixProvider
 import com.unifiedmessages.app.matrix.MatrixPlatformStartup
 import com.unifiedmessages.app.matrix.MatrixErrorDiagnostics
 import com.unifiedmessages.app.matrix.MatrixSecurityStatus
+import com.unifiedmessages.app.matrix.MatrixSyncProgress
+import com.unifiedmessages.app.matrix.MatrixSyncPhase
+import com.unifiedmessages.app.matrix.MatrixAppVisibility
+import org.matrix.rustcomponents.sdk.SyncServiceState
 import android.util.Log
 import com.unifiedmessages.app.BuildConfig
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,6 +38,7 @@ data class MatrixAccountUiState(
     val error: String? = null,
     val startupError: String? = MatrixPlatformStartup.errorMessage,
     val networkDiagnostics: String? = null,
+    val syncProgress: Map<String, MatrixSyncProgress> = emptyMap(),
 )
 
 @HiltViewModel
@@ -36,31 +47,104 @@ class MatrixAccountViewModel @Inject constructor(
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(MatrixAccountUiState())
     val state: StateFlow<MatrixAccountUiState> = mutableState.asStateFlow()
+    private val syncRequests = Channel<Unit>(Channel.CONFLATED)
+    private var foregroundSyncJob: Job? = null
 
     init {
         viewModelScope.launch {
+            provider.foregroundSyncStates.collectLatest { (accountId, serviceState) ->
+                if (serviceState == SyncServiceState.ERROR &&
+                    state.value.accounts.any { it.id == accountId && it.connectionState == "CONNECTED" }) {
+                    runCatching { provider.stopForegroundSync(accountId) }
+                    updateSync(accountId, MatrixSyncProgress.failed(
+                        "The SDK sync service stopped. Check your connection and tap Retry."))
+                    Log.e("MatrixDebug", "Foreground SDK sync service entered ERROR")
+                }
+            }
+        }
+        viewModelScope.launch {
             provider.accounts().collectLatest { accounts ->
                 mutableState.value = mutableState.value.copy(accounts = accounts)
+                syncRequests.trySend(Unit)
             }
         }
         viewModelScope.launch {
             try { provider.restoreAccounts() }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { showError(error) }
-            while (true) {
-                val connected = state.value.accounts.filter { it.connectionState == "CONNECTED" }
-                var hadFailure = false
-                connected.forEach { account ->
-                    try {
-                        provider.syncOnce(account.id)
-                        val status = provider.securityStatus(account.id)
-                        mutableState.value = state.value.copy(security = state.value.security + (account.id to status))
-                    }
-                    catch (cancelled: CancellationException) { throw cancelled }
-                    catch (error: Exception) { hadFailure = true; showError(error) }
+            syncRequests.trySend(Unit)
+        }
+    }
+
+    /** Called from the activity lifecycle; WorkManager alone handles background catch-up. */
+    fun setForegroundActive(active: Boolean) {
+        MatrixAppVisibility.isForeground = active
+        if (active) {
+            if (foregroundSyncJob?.isActive == true) return
+            foregroundSyncJob = viewModelScope.launch {
+                syncRequests.trySend(Unit)
+                while (isActive) {
+                    syncRequests.receive()
+                    state.value.accounts.filter { it.connectionState == "CONNECTED" &&
+                        state.value.syncProgress[it.id]?.phase != MatrixSyncPhase.FAILED }
+                        .forEach { runForegroundSync(it.id) }
+                    withTimeoutOrNull(30_000) { syncRequests.receive() }
+                    syncRequests.trySend(Unit)
                 }
-                delay(if (hadFailure) 15_000 else if (connected.isEmpty()) 5_000 else 1_000)
             }
+        } else {
+            foregroundSyncJob?.cancel()
+            foregroundSyncJob = null
+            viewModelScope.launch {
+                state.value.accounts.forEach { account ->
+                    runCatching { provider.stopForegroundSync(account.id) }
+                }
+            }
+        }
+    }
+
+    private suspend fun runForegroundSync(accountId: String) {
+        if (state.value.syncProgress[accountId]?.phase == null ||
+            state.value.syncProgress[accountId]?.phase == MatrixSyncPhase.FAILED) {
+            updateSync(accountId, MatrixSyncProgress.syncing())
+        }
+        Log.i("MatrixDebug", "Foreground Matrix sync started")
+        try {
+            withTimeout(60_000) { provider.syncOnce(accountId) }
+            val rooms = provider.roomCount(accountId)
+            updateSync(accountId, MatrixSyncProgress.synced(rooms))
+            Log.i("MatrixDebug", "Foreground Matrix sync completed; rooms=$rooms")
+            try { provider.startForegroundSync(accountId) }
+            catch (error: Exception) {
+                Log.w("MatrixDebug", "SDK sync service unavailable (${error.javaClass.simpleName}); room refresh continues")
+            }
+            val status = provider.securityStatus(accountId)
+            mutableState.value = state.value.copy(security = state.value.security + (accountId to status))
+        } catch (timeout: TimeoutCancellationException) {
+            updateSync(accountId, MatrixSyncProgress.failed("Timed out after 60 seconds. Tap Retry."))
+            Log.e("MatrixDebug", "Foreground Matrix sync timed out after 60 seconds")
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) {
+            val readable = "${MatrixErrorDiagnostics.explanation(error)} ${MatrixErrorDiagnostics.format(error)}"
+            updateSync(accountId, MatrixSyncProgress.failed(readable))
+            Log.e("MatrixDebug", "Foreground Matrix sync failed: ${error.javaClass.simpleName}")
+        }
+    }
+
+    private fun updateSync(accountId: String, progress: MatrixSyncProgress) {
+        mutableState.value = state.value.copy(syncProgress = state.value.syncProgress + (accountId to progress))
+    }
+
+    fun retrySync(accountId: String) = viewModelScope.launch {
+        updateSync(accountId, MatrixSyncProgress.syncing())
+        Log.i("MatrixDebug", "Manual Matrix sync retry requested")
+        try {
+            provider.retryStartup(accountId)
+            syncRequests.trySend(Unit)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) {
+            updateSync(accountId, MatrixSyncProgress.failed(MatrixErrorDiagnostics.format(error)))
+            Log.e("MatrixDebug", "Matrix sync retry unavailable: ${error.javaClass.simpleName}")
         }
     }
 
@@ -125,7 +209,8 @@ class MatrixAccountViewModel @Inject constructor(
         mutableState.value = state.value.copy(busy = true, error = null)
         try {
             provider.logout(accountId)
-            mutableState.value = state.value.copy(busy = false)
+            mutableState.value = state.value.copy(busy = false,
+                syncProgress = state.value.syncProgress - accountId)
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { showError(error) }
     }
@@ -135,7 +220,8 @@ class MatrixAccountViewModel @Inject constructor(
         try {
             provider.resetLocalMatrixData(accountId)
             mutableState.value = state.value.copy(busy = false,
-                security = state.value.security - accountId)
+                security = state.value.security - accountId,
+                syncProgress = state.value.syncProgress - accountId)
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { showError(error) }
     }

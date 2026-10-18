@@ -182,14 +182,22 @@ fun UnifiedMessagesApp(
     }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            matrixAccountViewModel.setForegroundActive(true)
+        }
         val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START) matrixAccountViewModel.setForegroundActive(true)
+            if (event == Lifecycle.Event.ON_STOP) matrixAccountViewModel.setForegroundActive(false)
             if (event == Lifecycle.Event.ON_RESUME) {
                 smsConnectionViewModel.refresh()
                 contactsViewModel.refresh()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            matrixAccountViewModel.setForegroundActive(false)
+        }
     }
     LaunchedEffect(Unit) { smsConnectionViewModel.refresh() }
     LaunchedEffect(matrixAccountState.accounts, welcomeSeen) {
@@ -377,6 +385,7 @@ fun UnifiedMessagesApp(
                             },
                             onLogout = matrixAccountViewModel::logout,
                             onResetLocalData = matrixAccountViewModel::resetLocalMatrixData,
+                            onRetrySync = matrixAccountViewModel::retrySync,
                             onRecoverKeys = matrixAccountViewModel::recoverKeys,
                             onSetBridgeBot = matrixAccountViewModel::setBridgeBot,
                             onBack = { matrixAccountsOpen = false },
