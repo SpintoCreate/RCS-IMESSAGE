@@ -41,6 +41,7 @@ import java.io.File
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
@@ -85,8 +86,8 @@ import org.matrix.rustcomponents.sdk.TypingNotificationsListener
 import org.matrix.rustcomponents.sdk.ClientDelegate
 import uniffi.matrix_sdk_common.BackgroundTaskFailureReason
 import org.matrix.rustcomponents.sdk.MediaSource
-import uniffi.ruma_events.MessageLikeEventType
-import uniffi.ruma_events.stateEventTypeFromString
+import org.matrix.rustcomponents.sdk.MessageLikeEventType
+import org.json.JSONArray
 
 data class MatrixLoginMethods(val password: Boolean, val sso: Boolean, val oidc: Boolean)
 data class MatrixSecurityStatus(val recovery: String, val verification: String)
@@ -408,7 +409,7 @@ class MatrixProvider @Inject constructor(
                 database.providerSyncDao().insertMapping(RemoteIdMappingEntity(
                     ProviderIds.mapping(accountId, "thread", roomId), accountId, "thread", roomId, threadId))
             } else database.threadDao().setMatrixMembership(threadId, "JOINED")
-            try { refreshBridgeState(accountId, roomId, room) }
+            try { refreshBridgeState(accountId, roomId, client) }
             catch (error: Exception) { Log.w("MatrixProvider", "Could not check bridge room state", error) }
             if (!timelines.containsKey(key)) {
                 val timeline = room.timeline()
@@ -485,17 +486,37 @@ class MatrixProvider @Inject constructor(
         database.threadDao().setMatrixMembership(threadId, "JOINED")
     }
 
-    private suspend fun refreshBridgeState(accountId: String, roomId: String, room: org.matrix.rustcomponents.sdk.Room) {
+    private suspend fun refreshBridgeState(accountId: String, roomId: String, client: Client) {
         val threadId = ProviderIds.thread(ProviderIds.namespace(id, accountId), roomId)
         val bot = database.providerAccountDao().get(accountId)?.bridgeBotId
         if (bot.isNullOrBlank()) return
-        val candidates = MatrixBridgeDetector.stateEventTypes.flatMap { type ->
-            room.stateEvents(stateEventTypeFromString(type)).mapNotNull { event ->
-                val eventId = event.eventId ?: return@mapNotNull null
-                MatrixBridgeDetector.detect(type, eventId, event.sender, event.contentJson, bot)
-                    ?.let { (event.timestamp?.toLong() ?: 0L) to it }
-            }
+        // SDK 0.18 does not expose Room.stateEvents. Read only bridge state through
+        // the authenticated Matrix client API; do not expose the token in a URL or log.
+        val encodedRoom = URLEncoder.encode(roomId, "UTF-8")
+        val url = URL("${client.homeserver().trimEnd('/')}/_matrix/client/v3/rooms/$encodedRoom/state")
+        require(url.protocol == "https") { "Matrix room state requires HTTPS." }
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            instanceFollowRedirects = false
+            connectTimeout = 15_000
+            readTimeout = 15_000
+            setRequestProperty("Authorization", "Bearer ${client.session().accessToken}")
         }
+        val candidates = try {
+            connection.inputStream.bufferedReader().use { reader ->
+                val events = JSONArray(reader.readText())
+                (0 until events.length()).mapNotNull { index ->
+                    val event = events.optJSONObject(index) ?: return@mapNotNull null
+                    val type = event.optString("type")
+                    if (type !in MatrixBridgeDetector.stateEventTypes) return@mapNotNull null
+                    val eventId = event.optString("event_id").takeIf { it.isNotBlank() }
+                        ?: return@mapNotNull null
+                    val content = event.optJSONObject("content")?.toString() ?: return@mapNotNull null
+                    MatrixBridgeDetector.detect(type, eventId, event.optString("sender"), content, bot)
+                        ?.let { event.optLong("origin_server_ts") to it }
+                }
+            }
+        } finally { connection.disconnect() }
         val match = candidates.maxByOrNull { it.first }?.second
         if (match == null) {
             if (database.bridgeRoomDao().get(threadId) != null) {
@@ -572,7 +593,7 @@ class MatrixProvider @Inject constructor(
             event.isOwn, message?.content?.isEdited == true, kind is MsgLikeKind.Redacted,
             transactionId, (sendState as? EventSendState.Sent)?.eventId,
             deliveryStatus, if (transactionId != null) event.lazyProvider.getSendHandle() else null,
-            media, event.reactions.flatMap { reaction ->
+            media, content.content.reactions.flatMap { reaction ->
                 reaction.senders.map { sender -> MatrixObservedReaction(sender.senderId, reaction.key,
                     sender.timestamp.toLong()) }
             }, event.isEditable, event.canBeRepliedTo, content.content.inReplyTo?.eventId(),
@@ -733,7 +754,7 @@ class MatrixProvider @Inject constructor(
         }
         val timeline = timelines["$accountId|$remoteRoomId"]?.timeline
             ?: error("Open this Matrix room first.")
-        timeline.sendReply(messageEventContentFromMarkdown(body.trim()), eventId).close()
+        timeline.sendReply(messageEventContentFromMarkdown(body.trim()), eventId)
     }
 
     suspend fun markRead(threadId: String) {
