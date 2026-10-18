@@ -30,11 +30,13 @@ import androidx.compose.ui.unit.dp
 import com.unifiedmessages.app.ui.components.StyleSurface
 import com.unifiedmessages.app.ui.theme.LocalAppTheme
 import com.unifiedmessages.app.ui.viewmodel.MatrixAccountUiState
+import com.unifiedmessages.app.BuildConfig
 
 @Composable
 fun MatrixAccountsScreen(
     state: MatrixAccountUiState,
     onDiscover: (String) -> Unit,
+    onNetworkTest: () -> Unit,
     onPasswordLogin: (String, String, String) -> Unit,
     onSsoLogin: (String) -> Unit,
     onOidcLogin: (String) -> Unit,
@@ -63,6 +65,12 @@ fun MatrixAccountsScreen(
         Text("Sign in to a Matrix homeserver to import rooms on this phone.",
             color = theme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         state.startupError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        if (BuildConfig.DEBUG) {
+            TextButton(onClick = onNetworkTest, enabled = !state.busy) {
+                Text("Test Matrix connection")
+            }
+            state.networkDiagnostics?.let { Text(it, color = theme.onSurfaceVariant) }
+        }
         state.accounts.forEach { account ->
             var bridgeBot by rememberSaveable(account.id) { mutableStateOf(account.bridgeBotId.orEmpty()) }
             StyleSurface(

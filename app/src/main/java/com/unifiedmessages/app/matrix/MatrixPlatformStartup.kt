@@ -2,6 +2,7 @@ package com.unifiedmessages.app.matrix
 
 import android.app.Application
 import android.util.Log
+import com.unifiedmessages.app.BuildConfig
 import org.matrix.rustcomponents.sdk.LogLevel
 import org.matrix.rustcomponents.sdk.TracingConfiguration
 import org.matrix.rustcomponents.sdk.initPlatform
@@ -29,13 +30,15 @@ object MatrixPlatformStartup {
                     logLevel = LogLevel.INFO,
                     traceLogPacks = emptyList(),
                     extraTargets = emptyList(),
-                    writeToStdoutOrSystem = true,
+                    // The SDK sends this stream to Android Logcat. Keep release builds quiet.
+                    writeToStdoutOrSystem = BuildConfig.DEBUG,
                     writeToFiles = null,
                     sentryConfig = null,
                 ),
                 useLightweightTokioRuntime = false,
             )
             Log.i(TAG, "Matrix Android platform and TLS verifier initialized")
+            if (BuildConfig.DEBUG) Log.i("MatrixDebug", "Matrix SDK tracing enabled for Logcat (SDK network targets use their built-in levels)")
         } catch (error: Throwable) {
             errorMessage = "Matrix could not start securely. Update or reinstall UnifiedMessages, then try again."
             Log.e(TAG, "Matrix Android platform initialization failed", error)

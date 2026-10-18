@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
+import com.unifiedmessages.app.BuildConfig
 import androidx.core.content.FileProvider
 import android.util.Base64
 import com.unifiedmessages.app.data.local.ProviderAccountEntity
@@ -38,6 +39,8 @@ import com.unifiedmessages.app.provider.ReplyCommandProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.io.ByteArrayOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
@@ -166,6 +169,36 @@ class MatrixProvider @Inject constructor(
         } finally {
             client.close()
         }
+    }
+
+    /** Debug-only comparison of SDK reqwest/rustls and Android's HTTPS stack on one fixed URL. */
+    suspend fun diagnoseNetwork(): String = withContext(Dispatchers.IO) {
+        check(BuildConfig.DEBUG) { "Network diagnostics are available only in debug builds." }
+        MatrixPlatformStartup.requireInitialized()
+        val target = "https://matrix.org/.well-known/matrix/client"
+        val sdk = try {
+            // An explicit homeserver URL avoids discovery during setup, so getUrl tests the exact target.
+            val client = ClientBuilder().homeserverUrl("https://matrix-client.matrix.org")
+                .inMemoryStore().build()
+            try { "SDK: HTTP GET succeeded (${client.getUrl(target).size} bytes)" }
+            finally { client.close() }
+        } catch (error: Exception) {
+            "SDK: HTTP GET failed\n${MatrixErrorDiagnostics.format(error)}"
+        }
+        val android = try {
+            val connection = (URL(target).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 10_000
+                readTimeout = 10_000
+                requestMethod = "GET"
+            }
+            try { "Android: HTTP GET returned ${connection.responseCode}" }
+            finally { connection.disconnect() }
+        } catch (error: Exception) {
+            "Android: HTTP GET failed\n${MatrixErrorDiagnostics.format(error)}"
+        }
+        Log.i("MatrixDebug", sdk)
+        Log.i("MatrixDebug", android)
+        "$sdk\n$android"
     }
 
     /** The password is used once; only the refreshable SDK session is retained. */

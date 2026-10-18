@@ -6,7 +6,10 @@ import com.unifiedmessages.app.data.local.ProviderAccountEntity
 import com.unifiedmessages.app.matrix.MatrixLoginMethods
 import com.unifiedmessages.app.matrix.MatrixProvider
 import com.unifiedmessages.app.matrix.MatrixPlatformStartup
+import com.unifiedmessages.app.matrix.MatrixErrorDiagnostics
 import com.unifiedmessages.app.matrix.MatrixSecurityStatus
+import android.util.Log
+import com.unifiedmessages.app.BuildConfig
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
@@ -24,6 +27,7 @@ data class MatrixAccountUiState(
     val busy: Boolean = false,
     val error: String? = null,
     val startupError: String? = MatrixPlatformStartup.errorMessage,
+    val networkDiagnostics: String? = null,
 )
 
 @HiltViewModel
@@ -66,7 +70,17 @@ class MatrixAccountViewModel @Inject constructor(
             val methods = provider.offeredLoginMethods(homeserver.trim())
             mutableState.value = state.value.copy(methods = methods, busy = false)
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: Exception) { showError(error) }
+        catch (error: Exception) { showError(error, logToLogcat = true) }
+    }
+
+    fun diagnoseNetwork() = viewModelScope.launch {
+        if (!BuildConfig.DEBUG) return@launch
+        mutableState.value = state.value.copy(busy = true, networkDiagnostics = null)
+        try {
+            val result = provider.diagnoseNetwork()
+            mutableState.value = state.value.copy(busy = false, networkDiagnostics = result)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) { showError(error, logToLogcat = true) }
     }
 
     fun loginPassword(homeserver: String, username: String, password: String) = viewModelScope.launch {
@@ -75,7 +89,7 @@ class MatrixAccountViewModel @Inject constructor(
             provider.loginPassword(homeserver.trim(), username.trim(), password)
             mutableState.value = state.value.copy(busy = false)
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: Exception) { showError(error) }
+        catch (error: Exception) { showError(error, listOf(password), logToLogcat = true) }
     }
 
     fun beginSso(homeserver: String, openBrowser: (String) -> Unit) = viewModelScope.launch {
@@ -85,7 +99,7 @@ class MatrixAccountViewModel @Inject constructor(
             openBrowser(url)
             mutableState.value = state.value.copy(busy = false)
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: Exception) { showError(error) }
+        catch (error: Exception) { showError(error, logToLogcat = true) }
     }
 
     fun beginOidc(homeserver: String, openBrowser: (String) -> Unit) = viewModelScope.launch {
@@ -95,7 +109,7 @@ class MatrixAccountViewModel @Inject constructor(
             openBrowser(url)
             mutableState.value = state.value.copy(busy = false)
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: Exception) { showError(error) }
+        catch (error: Exception) { showError(error, logToLogcat = true) }
     }
 
     fun finishBrowserLogin(callbackUrl: String) = viewModelScope.launch {
@@ -104,7 +118,7 @@ class MatrixAccountViewModel @Inject constructor(
             provider.finishBrowserLogin(callbackUrl)
             mutableState.value = state.value.copy(busy = false)
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: Exception) { showError(error) }
+        catch (error: Exception) { showError(error, listOf(callbackUrl), logToLogcat = true) }
     }
 
     fun logout(accountId: String) = viewModelScope.launch {
@@ -123,7 +137,7 @@ class MatrixAccountViewModel @Inject constructor(
             mutableState.value = state.value.copy(busy = false,
                 security = state.value.security + (accountId to provider.securityStatus(accountId)))
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: Exception) { showError(error) }
+        catch (error: Exception) { showError(error, listOf(recoveryKey)) }
     }
 
     fun setBridgeBot(accountId: String, botId: String) = viewModelScope.launch {
@@ -135,9 +149,16 @@ class MatrixAccountViewModel @Inject constructor(
         catch (error: Exception) { showError(error) }
     }
 
-    private fun showError(error: Exception) {
+    private fun showError(error: Exception, secrets: List<String> = emptyList(), logToLogcat: Boolean = false) {
+        val detail = MatrixErrorDiagnostics.format(error, secrets)
+        val message = "${MatrixErrorDiagnostics.explanation(error)}\n$detail"
+        if (BuildConfig.DEBUG && logToLogcat) {
+            message.lineSequence().forEach { line ->
+                line.chunked(3_000).forEach { chunk -> Log.e("MatrixDebug", chunk) }
+            }
+        }
         mutableState.value = state.value.copy(
-            busy = false, error = error.message ?: "Matrix connection failed. Try again.",
+            busy = false, error = message,
         )
     }
 }

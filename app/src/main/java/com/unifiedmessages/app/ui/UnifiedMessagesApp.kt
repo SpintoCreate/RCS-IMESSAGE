@@ -355,6 +355,7 @@ fun UnifiedMessagesApp(
                         MatrixAccountsScreen(
                             state = matrixAccountState,
                             onDiscover = matrixAccountViewModel::discover,
+                            onNetworkTest = matrixAccountViewModel::diagnoseNetwork,
                             onPasswordLogin = matrixAccountViewModel::loginPassword,
                             onSsoLogin = { homeserver ->
                                 matrixAccountViewModel.beginSso(homeserver) { url ->
