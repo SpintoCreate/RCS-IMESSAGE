@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.unifiedmessages.app.data.local.ProviderAccountEntity
 import com.unifiedmessages.app.matrix.MatrixLoginMethods
 import com.unifiedmessages.app.matrix.MatrixProvider
+import com.unifiedmessages.app.matrix.MatrixPlatformStartup
 import com.unifiedmessages.app.matrix.MatrixSecurityStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -22,6 +23,7 @@ data class MatrixAccountUiState(
     val methods: MatrixLoginMethods? = null,
     val busy: Boolean = false,
     val error: String? = null,
+    val startupError: String? = MatrixPlatformStartup.errorMessage,
 )
 
 @HiltViewModel

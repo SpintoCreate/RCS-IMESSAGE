@@ -158,6 +158,7 @@ class MatrixProvider @Inject constructor(
 
     /** Discovery runs against the entered homeserver; matrix.org is the default for the UI. */
     suspend fun offeredLoginMethods(homeserver: String = "matrix.org"): MatrixLoginMethods = withContext(Dispatchers.IO) {
+        MatrixPlatformStartup.requireInitialized()
         val client = ClientBuilder().serverNameOrHomeserverUrl(homeserver).inMemoryStore().build()
         try {
             val details = client.homeserverLoginDetails()
@@ -799,6 +800,7 @@ class MatrixProvider @Inject constructor(
     }
 
     private suspend fun buildClient(homeserver: String, reference: String, storeKey: String): Client {
+        MatrixPlatformStartup.requireInitialized()
         val directory = File(context.filesDir, "matrix/$reference").apply { mkdirs() }
         val dataPath = File(directory, "data").absolutePath
         val cachePath = File(directory, "cache").absolutePath

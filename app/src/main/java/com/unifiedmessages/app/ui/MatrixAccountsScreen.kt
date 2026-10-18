@@ -62,6 +62,7 @@ fun MatrixAccountsScreen(
         }
         Text("Sign in to a Matrix homeserver to import rooms on this phone.",
             color = theme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+        state.startupError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         state.accounts.forEach { account ->
             var bridgeBot by rememberSaveable(account.id) { mutableStateOf(account.bridgeBotId.orEmpty()) }
             StyleSurface(

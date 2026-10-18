@@ -67,6 +67,7 @@ import com.unifiedmessages.app.ui.viewmodel.ContactsViewModel
 import com.unifiedmessages.app.ui.viewmodel.InboxViewModel
 import com.unifiedmessages.app.ui.viewmodel.MessageSendViewModel
 import com.unifiedmessages.app.ui.viewmodel.MatrixAccountViewModel
+import com.unifiedmessages.app.matrix.MatrixPlatformStartup
 import com.unifiedmessages.app.ui.viewmodel.SmsConnectionViewModel
 import com.unifiedmessages.app.sms.PhoneNumbers
 import dagger.hilt.EntryPoint
@@ -104,6 +105,7 @@ fun UnifiedMessagesApp(
     val smsState by smsConnectionViewModel.uiState.collectAsState()
     val sendError by messageSendViewModel.error.collectAsState()
     val matrixAccountState by matrixAccountViewModel.state.collectAsState()
+    var showMatrixStartupError by remember { mutableStateOf(MatrixPlatformStartup.errorMessage != null) }
     val contacts by contactsViewModel.contacts.collectAsState()
     val hasContactsPermission by contactsViewModel.hasPermission.collectAsState()
     val deletedMessagePreferences = remember(context) {
@@ -564,6 +566,13 @@ fun UnifiedMessagesApp(
                     onDismissRequest = messageSendViewModel::clearError,
                     title = "Messaging issue",
                     message = error,
+                )
+            }
+            if (showMatrixStartupError) {
+                AppMessageDialog(
+                    onDismissRequest = { showMatrixStartupError = false },
+                    title = "Matrix unavailable",
+                    message = MatrixPlatformStartup.errorMessage ?: "Matrix failed to initialize.",
                 )
             }
         }

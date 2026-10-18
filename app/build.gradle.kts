@@ -20,8 +20,8 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 
@@ -71,6 +71,8 @@ dependencies {
     implementation("com.klinkerapps:android-smsmms:5.2.6")
     implementation("com.googlecode.libphonenumber:libphonenumber:8.13.55")
     implementation("org.matrix.rustcomponents:sdk-android:26.09.26")
+    // Matches rustls-platform-verifier-android 0.1.1 in the SDK 26.09.26 Cargo.lock.
+    implementation("org.rustls:rustls-platform-verifier:0.1.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
