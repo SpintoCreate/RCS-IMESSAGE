@@ -50,8 +50,11 @@ import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -111,6 +114,9 @@ class MatrixProvider @Inject constructor(
     private val emitted = MutableSharedFlow<MessageEvent>(extraBufferCapacity = 64)
     override val events: Flow<MessageEvent> = emitted.asSharedFlow()
     private val secrets = MatrixSecretStore(context)
+    private val startupGuard = MatrixStartupGuard(context)
+    private val restoreMutex = Mutex()
+    private val awaitingFirstSync = ConcurrentHashMap.newKeySet<String>()
     private val clients = ConcurrentHashMap<String, Client>()
     private val authDelegates = ConcurrentHashMap<String, TaskHandle>()
     private val reducer = MessageEventReducer(database)
@@ -224,6 +230,7 @@ class MatrixProvider @Inject constructor(
                 )
                 database.providerAccountDao().upsert(account)
                 clients.put(account.id, client)?.close()
+                awaitingFirstSync.add(account.id)
                 attachAuthDelegate(account.id, client)
                 account
             } catch (error: Exception) {
@@ -295,6 +302,7 @@ class MatrixProvider @Inject constructor(
             )
             database.providerAccountDao().upsert(account)
             clients.put(account.id, pending.client)?.close()
+            awaitingFirstSync.add(account.id)
             attachAuthDelegate(account.id, pending.client)
             account
         } catch (error: Exception) {
@@ -307,25 +315,84 @@ class MatrixProvider @Inject constructor(
 
     /** Restores every locally saved login without asking for a password again. */
     suspend fun restoreAccounts(): List<ProviderAccountEntity> = withContext(Dispatchers.IO) {
-        database.providerAccountDao().all(id).map { account ->
-            if (clients.containsKey(account.id)) return@map account
-            if (account.connectionState == "AUTH_EXPIRED") return@map account
-            val reference = account.credentialRef
-            val record = reference?.let(secrets::read)
-            if (reference == null || record == null) {
-                account.copy(connectionState = "SIGNED_OUT").also { database.providerAccountDao().upsert(it) }
-            } else {
-                val client = buildClient(record.session.homeserverUrl, reference, record.storePassphrase)
+        restoreMutex.withLock {
+            database.providerAccountDao().all(id).map { account ->
+                if (clients.containsKey(account.id)) return@map account
+                if (account.connectionState == "AUTH_EXPIRED" || account.connectionState == "SIGNED_OUT")
+                    return@map account
+                if (MatrixStartupPolicy.shouldSkip(account.connectionState, startupGuard.failures(account.id))) {
+                    val stopped = account.copy(connectionState = "NEEDS_ATTENTION")
+                    database.providerAccountDao().upsert(stopped)
+                    return@map stopped
+                }
+                var client: Client? = null
                 try {
+                    val reference = account.credentialRef ?: error("Saved Matrix session is missing.")
+                    val record = secrets.read(reference) ?: error("Saved Matrix session is unavailable.")
+                    client = buildClient(record.session.homeserverUrl, reference, record.storePassphrase)
                     client.restoreSession(record.session)
                     clients[account.id] = client
+                    awaitingFirstSync.add(account.id)
                     attachAuthDelegate(account.id, client)
                     account.copy(connectionState = "CONNECTED").also { database.providerAccountDao().upsert(it) }
-                } catch (_: Exception) {
-                    client.close()
-                    account.copy(connectionState = "DISCONNECTED").also { database.providerAccountDao().upsert(it) }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) {
+                    runCatching { client?.close() }
+                    markNeedsAttention(account.id, error)
                 }
             }
+        }
+    }
+
+    private suspend fun markNeedsAttention(accountId: String, error: Exception): ProviderAccountEntity {
+        Log.e("MatrixProvider", "Matrix account startup failed (${error.javaClass.simpleName}); pausing this account")
+        awaitingFirstSync.remove(accountId)
+        authDelegates.remove(accountId)?.let { runCatching { it.close() } }
+        timelines.keys.filter { it.startsWith("$accountId|") }.forEach { key ->
+            timelines.remove(key)?.let { room ->
+                runCatching { room.listener.close() }
+                runCatching { room.typingListener.close() }
+                runCatching { room.timeline.close() }
+            }
+        }
+        sendHandles.keys.filter { it.startsWith("$accountId|") }.forEach { key ->
+            sendHandles.remove(key)?.let { runCatching { it.close() } }
+        }
+        clients.remove(accountId)?.let { runCatching { it.close() } }
+        val account = database.providerAccountDao().get(accountId) ?: error("Matrix account is missing.")
+        if (account.connectionState == "SIGNED_OUT") return account
+        startupGuard.recordFailure(accountId)
+        return account.copy(connectionState = "NEEDS_ATTENTION").also {
+            database.providerAccountDao().upsert(it)
+        }
+    }
+
+    /** Local recovery only: Matrix credentials and SDK cache are removed, Room history stays intact. */
+    suspend fun resetLocalMatrixData(accountId: String) = withContext(Dispatchers.IO) {
+        restoreMutex.withLock {
+            val account = database.providerAccountDao().get(accountId) ?: return@withLock
+            require(account.providerId == id) { "Only a Matrix account can be reset here." }
+            awaitingFirstSync.remove(accountId)
+            authDelegates.remove(accountId)?.let { runCatching { it.close() } }
+            timelines.keys.filter { it.startsWith("$accountId|") }.forEach { key ->
+                timelines.remove(key)?.let { room ->
+                    runCatching { room.listener.close() }
+                    runCatching { room.typingListener.close() }
+                    runCatching { room.timeline.close() }
+                }
+            }
+            sendHandles.keys.filter { it.startsWith("$accountId|") }.forEach { key ->
+                sendHandles.remove(key)?.let { runCatching { it.close() } }
+            }
+            clients.remove(accountId)?.let { runCatching { it.close() } }
+            account.credentialRef?.let { reference ->
+                require(reference.matches(Regex("[0-9a-f]{64}"))) { "Invalid Matrix store reference." }
+                secrets.remove(reference)
+                val directory = File(context.filesDir, "matrix/$reference")
+                check(!directory.exists() || directory.deleteRecursively()) { "Could not clear the Matrix SDK store." }
+            }
+            database.providerAccountDao().upsert(account.copy(connectionState = "SIGNED_OUT", credentialRef = null))
+            startupGuard.clear(accountId)
         }
     }
 
@@ -374,7 +441,18 @@ class MatrixProvider @Inject constructor(
     }
 
     /** SDK sync tokens live in its encrypted store; Room also records each completed batch cursor. */
-    suspend fun syncOnce(accountId: String) = withContext(Dispatchers.IO) {
+    suspend fun syncOnce(accountId: String) {
+        try {
+            syncOnceInternal(accountId)
+            if (awaitingFirstSync.remove(accountId)) startupGuard.clear(accountId)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) {
+            if (awaitingFirstSync.contains(accountId)) markNeedsAttention(accountId, error)
+            throw error
+        }
+    }
+
+    private suspend fun syncOnceInternal(accountId: String) = withContext(Dispatchers.IO) {
         val client = clients[accountId] ?: error("Sign in to this Matrix account first.")
         val response = client.syncOnceV2(SyncSettingsV2(timeoutMs = 30_000uL))
         response.rooms.invited.forEach { roomId ->

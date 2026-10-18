@@ -58,7 +58,7 @@ interface ThreadDao {
             latest.timestamp AS lastTimestamp,
             COALESCE(latest.isDeleted, 0) AS lastIsDeleted,
             COALESCE(latest.deletedBySender, 0) AS lastDeletedBySender,
-            latest.contentType AS lastContentType,
+            COALESCE(latest.contentType, 'TEXT') AS lastContentType,
             CASE WHEN latest.isDeleted = 1 THEN NULL ELSE latest.subject END AS lastSubject,
             (SELECT COUNT(*) FROM messages m WHERE m.threadId = t.id
                 AND m.direction = 'INCOMING' AND m.isRead = 0 AND m.isDeleted = 0) AS unreadCount,

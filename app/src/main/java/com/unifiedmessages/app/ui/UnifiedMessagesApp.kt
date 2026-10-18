@@ -134,6 +134,7 @@ fun UnifiedMessagesApp(
     var selectedAttachments by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var matrixAccountsOpen by rememberSaveable { mutableStateOf(false) }
+    var matrixFailureShown by rememberSaveable { mutableStateOf(false) }
     var newMessageOpen by rememberSaveable { mutableStateOf(false) }
     var newMessageInitialRecipients by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
     val smsPermissions = remember {
@@ -200,6 +201,13 @@ fun UnifiedMessagesApp(
         ) {
             preferences.edit { putBoolean("matrix_notification_permission_asked_v1", true) }
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+    LaunchedEffect(matrixAccountState.accounts, welcomeSeen) {
+        if (welcomeSeen && !matrixFailureShown &&
+            matrixAccountState.accounts.any { it.connectionState == "NEEDS_ATTENTION" }) {
+            matrixFailureShown = true
+            matrixAccountsOpen = true
         }
     }
     LaunchedEffect(matrixCallbackUrl) {
@@ -368,6 +376,7 @@ fun UnifiedMessagesApp(
                                 }
                             },
                             onLogout = matrixAccountViewModel::logout,
+                            onResetLocalData = matrixAccountViewModel::resetLocalMatrixData,
                             onRecoverKeys = matrixAccountViewModel::recoverKeys,
                             onSetBridgeBot = matrixAccountViewModel::setBridgeBot,
                             onBack = { matrixAccountsOpen = false },

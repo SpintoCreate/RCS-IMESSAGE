@@ -130,6 +130,16 @@ class MatrixAccountViewModel @Inject constructor(
         catch (error: Exception) { showError(error) }
     }
 
+    fun resetLocalMatrixData(accountId: String) = viewModelScope.launch {
+        mutableState.value = state.value.copy(busy = true, error = null)
+        try {
+            provider.resetLocalMatrixData(accountId)
+            mutableState.value = state.value.copy(busy = false,
+                security = state.value.security - accountId)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) { showError(error) }
+    }
+
     fun recoverKeys(accountId: String, recoveryKey: String) = viewModelScope.launch {
         mutableState.value = state.value.copy(busy = true, error = null)
         try {

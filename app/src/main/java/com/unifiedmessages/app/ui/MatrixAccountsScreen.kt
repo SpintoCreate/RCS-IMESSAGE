@@ -41,6 +41,7 @@ fun MatrixAccountsScreen(
     onSsoLogin: (String) -> Unit,
     onOidcLogin: (String) -> Unit,
     onLogout: (String) -> Unit,
+    onResetLocalData: (String) -> Unit,
     onRecoverKeys: (String, String) -> Unit,
     onSetBridgeBot: (String, String) -> Unit,
     onBack: () -> Unit,
@@ -85,6 +86,14 @@ fun MatrixAccountsScreen(
                         Text("Your Matrix sign-in expired. Sign in again with this homeserver and account.",
                             color = theme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                     }
+                    if (account.connectionState == "NEEDS_ATTENTION") {
+                        Text("Matrix could not restore this account or start its first sync. Matrix is paused; SMS still works. Resetting signs this Matrix account out and removes only its local SDK session and cache. Saved conversations and settings remain.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium)
+                        Button(onClick = { onResetLocalData(account.id) }, enabled = !state.busy) {
+                            Text("Sign out and reset Matrix data")
+                        }
+                    }
                     if (account.connectionState == "CONNECTED") {
                         val security = state.security[account.id]
                         if (security?.verification == "UNVERIFIED") {
@@ -117,7 +126,7 @@ fun MatrixAccountsScreen(
                             Text("Save bridge bot")
                         }
                     }
-                    if (account.credentialRef != null) {
+                    if (account.credentialRef != null && account.connectionState != "NEEDS_ATTENTION") {
                         TextButton(onClick = { onLogout(account.id) }, enabled = !state.busy) {
                             Text("Sign out")
                         }
