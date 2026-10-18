@@ -4,6 +4,12 @@ UnifiedMessages is a free, native Android messaging app built with Kotlin, Jetpa
 
 **iMessage and RCS are not connected.** Matrix support is experimental and still needs testing with real accounts on a phone. iMessage/OpenBubbles, RCS, and OpenPigeon remain placeholders. A Matrix bridge label does not install or configure that bridge. Making UnifiedMessages the default SMS app may interrupt RCS in Google Messages. The app uses no paid API or subscription; your carrier may charge for SMS, MMS, or mobile data under your plan.
 
+## Personal Google Messages spike
+
+The separate `:gmessages` Gradle module is an empty, removable boundary for a possible linked-device prototype. It does **not** add Google Messages pairing or RCS to the app yet. Future libgm bindings would remain there and connect to the app only through its provider interface. libgm belongs to `mautrix-gmessages` and is AGPL-3.0-or-later; the published embedding exceptions do not cover this app. This experiment is for one user's personal build only. **Do not distribute or share an APK/AAB containing the module without resolving the license.** See [LICENSES.md](LICENSES.md) and [the feasibility report](docs/google-messages-linked-device-spike.md).
+
+Debug builds include the isolated module. Release builds exclude it by default; `:app:verifyGmessagesReleaseIsolation` fails a release build if it enters the runtime classpath without the `includeGMessagesInRelease` Gradle opt-in. That opt-in does not grant distribution rights. The current release APK has no libgm code.
+
 ## What you need
 
 - A computer with the free [Android Studio](https://developer.android.com/studio), its bundled JDK, and Android SDK Platform **36**.

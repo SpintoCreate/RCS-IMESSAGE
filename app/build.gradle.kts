@@ -49,6 +49,14 @@ kotlin {
 }
 
 dependencies {
+    // The isolated, removable Google Messages spike is available only in debug builds.
+    // An explicit opt-in is required before it can enter a release runtime classpath.
+    val includeGMessagesInRelease = providers.gradleProperty("includeGMessagesInRelease")
+        .map(String::toBoolean).getOrElse(false)
+    debugImplementation(project(":gmessages"))
+    if (includeGMessagesInRelease) {
+        releaseImplementation(project(":gmessages"))
+    }
     val composeBom = platform("androidx.compose:compose-bom:2025.09.01")
     implementation(composeBom)
     implementation("androidx.core:core-ktx:1.16.0")
@@ -77,4 +85,28 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+}
+
+val verifyGmessagesReleaseIsolation = tasks.register("verifyGmessagesReleaseIsolation") {
+    group = "verification"
+    description = "Fails if the AGPL Google Messages module enters a release build without opt-in."
+    doLast {
+        val allowed = providers.gradleProperty("includeGMessagesInRelease")
+            .map(String::toBoolean).getOrElse(false)
+        val containsGMessages = configurations.getByName("releaseRuntimeClasspath")
+            .incoming.resolutionResult.allComponents.any { component ->
+                val identifier = component.id
+                identifier is org.gradle.api.artifacts.component.ProjectComponentIdentifier &&
+                    identifier.projectPath == ":gmessages"
+            }
+        check(allowed || !containsGMessages) {
+            "The AGPL :gmessages module is in the release runtime classpath while " +
+                "includeGMessagesInRelease is off. Remove the dependency or explicitly opt in " +
+                "for a personal, undistributed build."
+        }
+    }
+}
+
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    dependsOn(verifyGmessagesReleaseIsolation)
 }
