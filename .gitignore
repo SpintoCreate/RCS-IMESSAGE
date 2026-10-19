@@ -10,3 +10,14 @@ local.properties
 *.keystore
 *.apk
 *.aab
+gmessages/libs/*.aar
+gmessages-cookie-export*.zip
+*.gmessages-cookies.zip
+*.gmessages-session.json
+*.gmessages-cookies.json
+*.cookie-export.json
+*.cookies.json
+*.session.json
+*.cookies.zip
+*.session-export.zip
+*.gmessages-export.zip
