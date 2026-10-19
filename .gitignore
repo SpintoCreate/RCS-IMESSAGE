@@ -11,6 +11,7 @@ local.properties
 *.apk
 *.aab
 gmessages/libs/*.aar
+!gmessages/libs/libgm.aar
 gmessages-cookie-export*.zip
 *.gmessages-cookies.zip
 *.gmessages-session.json

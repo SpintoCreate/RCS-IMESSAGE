@@ -1,12 +1,12 @@
 # Personal Google Messages linked-device prototype
 
-This removable module contains an experimental **debug-only** libgm wrapper. It is separate from the normal SMS and Matrix providers and does not connect to the main inbox. The phone tests run from a separate `GMessagesDebug` launcher icon. The main UI and release build do not use the wrapper.
+This removable module contains an experimental **debug-only** libgm wrapper. It is separate from the normal SMS and Matrix providers and does not connect to the main inbox. The phone tests run from a separate `GMessagesDebug` launcher icon. The main UI and release build do not use the wrapper. The generated `libs/libgm.aar` is committed only to the private spike branch for the owner's personal phone test.
 
 `libgm` belongs to `mautrix-gmessages` and is licensed AGPL-3.0-or-later. The published embedding exceptions do not name UnifiedMessages. This is for one personal, undistributed build. **Do not distribute its APK or AAB** until the license and source obligations are resolved. See [LICENSES.md](../LICENSES.md). Delete this module, its `settings.gradle.kts` include, and the app Gradle dependency lines to remove the experiment.
 
 ## Build the personal debug prototype
 
-The wrapper is pinned in `go/go.mod`. Build it only from those Go modules; no copy of upstream source is committed here. Use Go 1.27.2, a JDK with `javac`, Android SDK 36, official Android NDK r28c (`28.2.13676358`), and the pinned `gomobile` version used for this spike. NDK r28c is the official package available in the cloud toolchain and passed the arm64, API 29 build. The AAR is generated locally and ignored by Git.
+The wrapper is pinned in `go/go.mod`. Build it only from those Go modules; no copy of upstream source is committed here. Use Go 1.27.2, a JDK with `javac`, Android SDK 36, official Android NDK r28c (`28.2.13676358`), and the pinned `gomobile` version used for this spike. NDK r28c is the official package available in the cloud toolchain and passed the arm64, API 29 build. The private branch includes the generated AAR, so a phone tester does not need to install Go or the NDK. The steps below are only for rebuilding that AAR.
 
 From `gmessages/go` in a shell with `go`, `gomobile`, `javac`, `ANDROID_HOME`, `ANDROID_SDK_ROOT`, and `ANDROID_NDK_HOME` available:
 
@@ -16,9 +16,9 @@ go test ./gmbind
 gomobile bind -target=android/arm64 -androidapi=29 -o ../libs/libgm.aar ./gmbind
 ```
 
-On Windows, use PowerShell equivalents for environment variables or build the AAR in WSL with Android SDK and NDK installed. Then open the repository in Android Studio, enable the Android SDK 36 package, and run the `app` **debug** configuration with Gradle property `-PenableGMessagesPrototype=true`. From a terminal, `./gradlew -PenableGMessagesPrototype=true :app:assembleDebug` produces `app/build/outputs/apk/debug/app-debug.apk`. This build has a second launcher icon, `GMessagesDebug`. The release build excludes the prototype; `:app:verifyGmessagesReleaseIsolation` checks that the AGPL module is absent unless explicitly opted in. The opt-in does not grant distribution rights.
+On Windows, download the **private** `spike/google-messages-linked-device` branch as a ZIP, extract it, and open the extracted project in Android Studio. Confirm `gmessages/libs/libgm.aar` exists. Enable Android SDK 36. Add `enableGMessagesPrototype=true` to the local copy of `gradle.properties`, sync, select the `app` debug run configuration and your USB-connected phone, then click Run. The debug build has a second launcher icon, `GMessagesDebug`. The release build excludes the prototype; `:app:verifyGmessagesReleaseIsolation` checks that the AGPL module is absent unless explicitly opted in. The opt-in does not grant distribution rights.
 
-The built AAR in this environment was 7,152,639 bytes and contained only `arm64-v8a`; its declared minimum API was 29. The debug APK must be run on an arm64 device such as the Nothing Phone (2). The AAR itself is not committed or pushed.
+The built AAR is 7,152,639 bytes and contains only `arm64-v8a`; its declared minimum API is 29. The debug APK must be run on an arm64 device such as the Nothing Phone (2). Do not make this branch or repository public or share its AAR or APK without first resolving the AGPL license obligations.
 
 ## Pairing test, in order
 
