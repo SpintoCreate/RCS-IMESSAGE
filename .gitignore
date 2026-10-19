@@ -21,3 +21,6 @@ gmessages-cookie-export*.zip
 *.cookies.zip
 *.session-export.zip
 *.gmessages-export.zip
+
+gmessages/libs/*.jar
+.venv/

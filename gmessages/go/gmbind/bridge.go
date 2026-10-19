@@ -27,6 +27,7 @@ type Bridge struct {
 	mu       sync.Mutex
 	client   *libgm.Client
 	pairing  *libgm.PairingSession
+	bgCtx    context.Context
 	cancel   context.CancelFunc
 	chats    []*gmproto.Conversation
 	sims     map[string]*gmproto.SIMCard
@@ -80,7 +81,7 @@ func (b *Bridge) BeginPairing(cookieJSON string) (string, error) {
 	client := b.makeClient(ad)
 	ctx, cancel := context.WithCancel(context.Background())
 	b.mu.Lock()
-	b.client, b.cancel, b.status = client, cancel, "pairing"
+	b.client, b.bgCtx, b.cancel, b.status = client, ctx, cancel, "pairing"
 	b.mu.Unlock()
 	requestCtx, stop := context.WithTimeout(ctx, 60*time.Second)
 	defer stop()
@@ -95,13 +96,13 @@ func (b *Bridge) BeginPairing(cookieJSON string) (string, error) {
 
 func (b *Bridge) FinishPairing() error {
 	b.mu.Lock()
-	client, pairing, ctx := b.client, b.pairing, b.cancel
+	client, pairing, bgCtx := b.client, b.pairing, b.bgCtx
 	b.mu.Unlock()
-	if client == nil || pairing == nil || ctx == nil { return errors.New("no pairing is waiting for confirmation") }
+	if client == nil || pairing == nil || bgCtx == nil { return errors.New("no pairing is waiting for confirmation") }
 	requestCtx, stop := context.WithTimeout(context.Background(), 120*time.Second)
 	defer stop()
 	if _, err := client.FinishGaiaPairing(requestCtx, pairing); err != nil { b.Close(); return fmt.Errorf("confirm phone pairing: %w", err) }
-	if err := client.Connect(context.Background()); err != nil { b.Close(); return fmt.Errorf("connect paired device: %w", err) }
+	if err := client.Connect(bgCtx); err != nil { b.Close(); return fmt.Errorf("connect paired device: %w", err) }
 	b.mu.Lock()
 	b.pairing, b.status = nil, "connected"
 	b.mu.Unlock()
@@ -126,7 +127,7 @@ func (b *Bridge) Restore(sessionJSON string) error {
 	client := b.makeClient(&ad)
 	ctx, cancel := context.WithCancel(context.Background())
 	b.mu.Lock()
-	b.client, b.cancel, b.status = client, cancel, "connecting"
+	b.client, b.bgCtx, b.cancel, b.status = client, ctx, cancel, "connecting"
 	b.mu.Unlock()
 	if err := client.Connect(ctx); err != nil { b.Close(); return fmt.Errorf("restore linked-device connection: %w", err) }
 	b.mu.Lock()
@@ -149,6 +150,16 @@ func (b *Bridge) ListConversations() (int, error) {
 	count := len(b.chats)
 	b.mu.Unlock()
 	return count, nil
+}
+
+// ConversationLabel is shown only on the private debug screen; it is never logged.
+func (b *Bridge) ConversationLabel(index int) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if index < 0 || index >= len(b.chats) { return "" }
+	name := strings.TrimSpace(b.chats[index].GetName())
+	if name == "" { return fmt.Sprintf("Unnamed conversation %d", index) }
+	return name
 }
 
 // SendText uses a 0-based index from the last ListConversations call. No IDs leave this API.
@@ -189,7 +200,7 @@ func (b *Bridge) Status() string { b.mu.Lock(); defer b.mu.Unlock(); return b.st
 func (b *Bridge) Close() {
 	b.mu.Lock()
 	client, cancel := b.client, b.cancel
-	b.client, b.cancel, b.pairing, b.chats, b.sims, b.status = nil, nil, nil, nil, nil, "disconnected"
+	b.client, b.bgCtx, b.cancel, b.pairing, b.chats, b.sims, b.status = nil, nil, nil, nil, nil, nil, "disconnected"
 	b.mu.Unlock()
 	if cancel != nil { cancel() }
 	if client != nil { client.Disconnect() }

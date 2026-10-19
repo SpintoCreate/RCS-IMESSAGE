@@ -53,7 +53,12 @@ dependencies {
     // An explicit opt-in is required before it can enter a release runtime classpath.
     val includeGMessagesInRelease = providers.gradleProperty("includeGMessagesInRelease")
         .map(String::toBoolean).getOrElse(false)
+    val enableGMessagesPrototype = providers.gradleProperty("enableGMessagesPrototype")
+        .map(String::toBoolean).getOrElse(false)
     debugImplementation(project(":gmessages"))
+    if (enableGMessagesPrototype) {
+        debugImplementation(files("../gmessages/libs/libgm.aar"))
+    }
     if (includeGMessagesInRelease) {
         releaseImplementation(project(":gmessages"))
     }
