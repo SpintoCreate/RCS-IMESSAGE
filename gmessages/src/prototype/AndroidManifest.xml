@@ -3,6 +3,7 @@
         <activity
             android:name="com.unifiedmessages.gmessages.GMessagesDebugActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:label="GMessagesDebug">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

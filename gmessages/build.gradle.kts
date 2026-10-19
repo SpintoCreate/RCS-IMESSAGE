@@ -28,6 +28,7 @@ android {
     if (enableGMessagesPrototype) {
         sourceSets.getByName("debug").java.srcDir("src/prototype/kotlin")
         sourceSets.getByName("debug").manifest.srcFile("src/prototype/AndroidManifest.xml")
+        sourceSets.getByName("test").java.srcDir("src/prototypeTest/kotlin")
     }
 }
 
@@ -41,7 +42,7 @@ dependencies {
     if (enableGMessagesPrototype) {
         add("debugCompileOnly", files(libgmAar))
         add("debugImplementation", "androidx.activity:activity-ktx:1.10.1")
-        add("debugImplementation", "net.lingala.zip4j:zip4j:2.11.5")
     }
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

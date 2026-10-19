@@ -25,3 +25,5 @@ gmessages-cookie-export*.zip
 
 gmessages/libs/*.jar
 .venv/
+__pycache__/
+*.pyc

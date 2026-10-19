@@ -1,11 +1,10 @@
 package com.unifiedmessages.gmessages
 
-import android.app.Activity
+import android.content.ClipboardManager
 import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.provider.DocumentsContract
 import android.util.Log
 import android.view.ViewGroup
 import android.widget.Button
@@ -14,7 +13,6 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.ComponentActivity
-import androidx.activity.result.contract.ActivityResultContracts
 import gmbind.Bridge
 import gmbind.Gmbind
 import org.json.JSONObject
@@ -29,28 +27,13 @@ class GMessagesDebugActivity : ComponentActivity() {
     private lateinit var conversations: TextView
     private lateinit var received: TextView
     private lateinit var passphrase: EditText
+    private lateinit var encryptedInput: EditText
     private lateinit var chosenIndex: EditText
     private lateinit var message: EditText
     private val busy = AtomicBoolean(false)
     private val handler = Handler(Looper.getMainLooper())
     private var restoreFailures = 0
     @Volatile private var sensitiveValues: List<String> = emptyList()
-
-    private val pickExport = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
-        val uri = result.data?.data ?: return@registerForActivityResult
-        val password = passphrase.text.toString()
-        passphrase.text.clear()
-        runStep("pair import") {
-            val json = CookieImport.decrypt(contentResolver, uri, password)
-            val data = JSONObject(json)
-            sensitiveValues = data.keys().asSequence().mapNotNull { data.optString(it).takeIf(String::isNotBlank) }.toList()
-            // A provider that cannot delete its document is not a completed import.
-            CookieImport.deleteImportedFile(contentResolver, uri)
-            val emoji = bridge.beginPairing(json)
-            "Pairing request started. Tap this emoji in Google Messages: $emoji, then tap Confirm below."
-        }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -78,17 +61,39 @@ class GMessagesDebugActivity : ComponentActivity() {
         label("Personal Google Messages linked-device test. Google Messages must stay the default SMS app. Never share this build or a cookie export.")
         status = label("Disconnected")
         passphrase = EditText(this).apply {
-            hint = "Export passphrase"
+            hint = "Nine-word import phrase shown on your PC"
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
             column.addView(this)
         }
-        button("1. Choose encrypted ZIP and start pairing") {
-            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                addCategory(Intent.CATEGORY_OPENABLE)
-                type = "application/zip"
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        encryptedInput = EditText(this).apply {
+            hint = "Encrypted transfer from PC (USB fills this automatically)"
+            filters = arrayOf(android.text.InputFilter.LengthFilter(100_000))
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            minLines = 2
+            column.addView(this)
+        }
+        receiveEncryptedIntent(intent)
+        button("1. Import encrypted transfer and start pairing") {
+            val encrypted = encryptedInput.text.toString().trim()
+            val entered = passphrase.text
+            val password = CharArray(entered.length) { entered[it] }
+            encryptedInput.text.clear()
+            passphrase.text.clear()
+            runStep("pair import") {
+                try {
+                    val json = EncryptedTransfer.decrypt(encrypted, password)
+                    val data = JSONObject(json)
+                    sensitiveValues = data.keys().asSequence()
+                        .mapNotNull { data.optString(it).takeIf(String::isNotBlank) }.toList()
+                    clearMatchingClipboard(encrypted)
+                    val emoji = bridge.beginPairing(json)
+                    "Pairing request started. Tap this emoji in Google Messages: $emoji, then tap Confirm below."
+                } finally {
+                    password.fill('\u0000')
+                }
             }
-            pickExport.launch(intent)
         }
         button("Confirm emoji tapped on phone") {
             runStep("pair confirmed") {
@@ -148,6 +153,27 @@ class GMessagesDebugActivity : ComponentActivity() {
         handler.postDelayed(watchdog, 30_000)
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        receiveEncryptedIntent(intent)
+    }
+
+    private fun receiveEncryptedIntent(intent: Intent?) {
+        val encrypted = intent?.getStringExtra("encrypted_transfer") ?: return
+        intent.removeExtra("encrypted_transfer")
+        encryptedInput.setText(encrypted)
+        status.text = "Encrypted transfer received over USB. Enter the passphrase shown on your PC."
+    }
+
+    private fun clearMatchingClipboard(encrypted: String) {
+        runOnUiThread {
+            val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+            if (clipboard.primaryClip?.getItemAt(0)?.text?.toString() == encrypted) {
+                clipboard.clearPrimaryClip()
+            }
+        }
+    }
+
     private fun runStep(step: String, operation: () -> String) {
         if (!busy.compareAndSet(false, true)) return
         status.text = "$step: working…"
@@ -200,6 +226,8 @@ class GMessagesDebugActivity : ComponentActivity() {
 
     override fun onDestroy() {
         handler.removeCallbacks(watchdog)
+        passphrase.text.clear()
+        encryptedInput.text.clear()
         bridge.close()
         super.onDestroy()
     }
