@@ -8,6 +8,12 @@ I found **no upstream-documented, working authorization path for a third-party A
 
 This is a statement about the inspected public sources, not proof that no private arrangement or future method can exist. The app pins [rustpush `a7fab473`](https://github.com/OpenBubbles/rustpush/tree/a7fab473e7a33325a760635285db2860de8e1cb0); the public repository HEAD checked here was [`b3c96c2`](https://github.com/OpenBubbles/rustpush/tree/b3c96c23e1aae78d1229ebaccb12027624f1eaff). Both still embed the same FairPlay file paths. Neither README documents a third-party production signing path.
 
+## What can be established about the shipped OpenBubbles release
+
+The app's [Rust manifest](https://github.com/OpenBubbles/openbubbles-app/blob/eed1b6332efbb17adbf5ebfa2263ad770169f75e/rust/Cargo.toml#L1-L13) links the pinned rustpush source, and its [public Android CI workflow](https://github.com/OpenBubbles/openbubbles-app/blob/eed1b6332efbb17adbf5ebfa2263ad770169f75e/.github/workflows/build.yml#L45-L74) copies the public legacy pair into all ten required paths, then **attempts** a debug alpha APK build. The workflow itself even notes an expected build failure from another dependency. It does not establish the provenance or effectiveness of signing material in a separately distributed Android release. The inspected [GitHub Releases listing](https://github.com/OpenBubbles/openbubbles-app/releases) offered Linux archives, not a release Android APK with matching build provenance. I did not inspect a shipped APK for embedded keys.
+
+For a release built from this source, the activation signer would select a pair compiled into its native library, sign the activation info locally, and send it directly to Apple. The iPhone relay does **not** deliver a FairPlay key at runtime. Public evidence does not establish whether a currently working release used the public legacy pair, a separately supplied pair, or a different build path. Do not present any of those possibilities as a confirmed fact, and do not infer reusable rights from a working binary.
+
 ## Build inputs versus live activation
 
 | Stage | What public source provides | What remains unproved or missing |
