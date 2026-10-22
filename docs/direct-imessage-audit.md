@@ -2,6 +2,8 @@
 
 This audit is for `feature/direct-imessage-rustpush`. It records source evidence, not a working iMessage connection. No registration request, Apple account login, or device pairing was attempted in the cloud environment.
 
+The follow-up [activation-path audit](imessage-activation-path.md) separates compilation from runtime Apple registration. [Distribution requirements](imessage-distribution.md) are documented separately.
+
 ## Existing app
 
 - The feature branch starts from `main` at `b4ce6e3`. The Google Messages spike and its local untracked files are preserved separately. The working tree had no tracked edits, and no `AGENTS.md` was present.
