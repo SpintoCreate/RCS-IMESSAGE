@@ -24,3 +24,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "UnifiedMessages"
 include(":app")
+include(":imessage-native")

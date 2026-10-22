@@ -49,6 +49,11 @@ kotlin {
 }
 
 dependencies {
+    // Opt-in native ABI smoke build. No iMessage send route is exposed until
+    // registration and real-device messaging tests succeed.
+    if (providers.gradleProperty("enableImessageNative").map(String::toBoolean).getOrElse(false)) {
+        debugImplementation(project(":imessage-native"))
+    }
     val composeBom = platform("androidx.compose:compose-bom:2025.09.01")
     implementation(composeBom)
     implementation("androidx.core:core-ktx:1.16.0")
